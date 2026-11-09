@@ -65,21 +65,168 @@ JT.sheets = {
     return r.json();
   },
   HEADERS: ['Company', 'Job Title', 'Date Applied', 'Job Link', 'Status', 'Contact', 'Location', 'Employment Type', 'Experience', 'Salary', 'Stage', 'Logged At', 'Notes', 'Unique Key'],
-  async resolveSheetName(spreadsheetId, preferredName, interactive) {
+  async resolveSheetInfo(spreadsheetId, preferredName, interactive) {
     try {
-      const meta = await this.api(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`, {}, interactive);
-      const titles = (meta.sheets || []).map(s => s.properties && s.properties.title).filter(Boolean);
-      if (!titles.length) return preferredName || 'Applications';
-      const match = titles.find(t => t.toLowerCase() === (preferredName || 'applications').toLowerCase());
-      return match || titles[0];
+      const meta = await this.api(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`, {}, interactive);
+      const sheets = meta.sheets || [];
+      if (!sheets.length) return { name: preferredName || 'Applications', id: 0 };
+      const match = sheets.find(s => s.properties && s.properties.title && s.properties.title.toLowerCase() === (preferredName || 'applications').toLowerCase());
+      const selected = match || sheets[0];
+      return { name: selected.properties.title, id: selected.properties.sheetId || 0 };
     } catch {
-      return preferredName || 'Applications';
+      return { name: preferredName || 'Applications', id: 0 };
+    }
+  },
+  async resolveSheetName(spreadsheetId, preferredName, interactive) {
+    const info = await this.resolveSheetInfo(spreadsheetId, preferredName, interactive);
+    return info.name;
+  },
+  async applyFormatting(spreadsheetId, sheetId, interactive) {
+    try {
+      const widths = [180, 240, 115, 125, 135, 150, 160, 125, 100, 110, 140, 150, 220, 80];
+      const colRequests = widths.map((w, idx) => ({
+        updateDimensionProperties: {
+          range: { sheetId, dimension: 'COLUMNS', startIndex: idx, endIndex: idx + 1 },
+          properties: { pixelSize: w },
+          fields: 'pixelSize'
+        }
+      }));
+
+      const statusValues = ['Applied', 'Screening / HR', 'Interviewing', 'Assessment', 'Offer', 'Rejected', 'Withdrawn'];
+      const dataValidationReq = {
+        setDataValidation: {
+          range: { sheetId, startRowIndex: 1, startColumnIndex: 4, endColumnIndex: 5 },
+          rule: {
+            condition: {
+              type: 'ONE_OF_LIST',
+              values: statusValues.map(v => ({ userEnteredValue: v }))
+            },
+            showCustomUi: true,
+            strict: false
+          }
+        }
+      };
+
+      const condRules = [
+        { val: 'Applied', bg: { red: 0.88, green: 0.95, blue: 1 }, fg: { red: 0.01, green: 0.41, blue: 0.63 } },
+        { val: 'Interviewing', bg: { red: 1, green: 0.95, blue: 0.78 }, fg: { red: 0.71, green: 0.33, blue: 0.04 } },
+        { val: 'Offer', bg: { red: 0.86, green: 0.99, blue: 0.91 }, fg: { red: 0.08, green: 0.50, blue: 0.24 } },
+        { val: 'Rejected', bg: { red: 1, green: 0.89, blue: 0.89 }, fg: { red: 0.73, green: 0.11, blue: 0.11 } }
+      ].map(c => ({
+        addConditionalFormatRule: {
+          rule: {
+            ranges: [{ sheetId, startRowIndex: 1, startColumnIndex: 4, endColumnIndex: 5 }],
+            booleanRule: {
+              condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: c.val }] },
+              format: { backgroundColor: c.bg, textFormat: { bold: true, foregroundColor: c.fg } }
+            }
+          },
+          index: 0
+        }
+      }));
+
+      const requests = [
+        // 1. Freeze Header Row (Row 1)
+        {
+          updateSheetProperties: {
+            properties: { sheetId, gridProperties: { frozenRowCount: 1 } },
+            fields: 'gridProperties.frozenRowCount'
+          }
+        },
+        // 2. Format Header Row (Dark Slate #1E293B, White Bold text, 10pt)
+        {
+          repeatCell: {
+            range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 14 },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor: { red: 0.118, green: 0.161, blue: 0.231 },
+                textFormat: { bold: true, fontSize: 10, foregroundColor: { red: 1, green: 1, blue: 1 } },
+                verticalAlignment: 'MIDDLE',
+                horizontalAlignment: 'LEFT'
+              }
+            },
+            fields: 'userEnteredFormat(backgroundColor,textFormat,verticalAlignment,horizontalAlignment)'
+          }
+        },
+        // 3. Header Row Height (38px)
+        {
+          updateDimensionProperties: {
+            range: { sheetId, dimension: 'ROWS', startIndex: 0, endIndex: 1 },
+            properties: { pixelSize: 38 },
+            fields: 'pixelSize'
+          }
+        },
+        // 4. Center-align Headers for Date, Link, Status, Work Type, Exp, Salary
+        {
+          repeatCell: {
+            range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 2, endColumnIndex: 5 },
+            cell: { userEnteredFormat: { horizontalAlignment: 'CENTER' } },
+            fields: 'userEnteredFormat.horizontalAlignment'
+          }
+        },
+        {
+          repeatCell: {
+            range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 7, endColumnIndex: 10 },
+            cell: { userEnteredFormat: { horizontalAlignment: 'CENTER' } },
+            fields: 'userEnteredFormat.horizontalAlignment'
+          }
+        },
+        // 5. Data rows alignment: Center align Date (col 2), Link (col 3), Status (col 4), Type/Exp/Sal (col 7-10)
+        {
+          repeatCell: {
+            range: { sheetId, startRowIndex: 1, startColumnIndex: 2, endColumnIndex: 5 },
+            cell: { userEnteredFormat: { horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } },
+            fields: 'userEnteredFormat(horizontalAlignment,verticalAlignment)'
+          }
+        },
+        {
+          repeatCell: {
+            range: { sheetId, startRowIndex: 1, startColumnIndex: 7, endColumnIndex: 10 },
+            cell: { userEnteredFormat: { horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } },
+            fields: 'userEnteredFormat(horizontalAlignment,verticalAlignment)'
+          }
+        },
+        // 6. Professional Column Widths
+        ...colRequests,
+        // 7. Status Dropdown (Data Validation)
+        dataValidationReq,
+        // 8. Status Conditional Highlighting
+        ...condRules
+      ];
+
+      await this.api(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+        { method: 'POST', body: JSON.stringify({ requests }) }, interactive).catch(() => {});
+
+      // Alternating row colors (Zebra Striping)
+      try {
+        await this.api(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+          method: 'POST',
+          body: JSON.stringify({
+            requests: [{
+              addBanding: {
+                bandedRange: {
+                  range: { sheetId, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: 14 },
+                  rowProperties: {
+                    headerColor: { red: 0.118, green: 0.161, blue: 0.231 },
+                    firstBandColor: { red: 1, green: 1, blue: 1 },
+                    secondBandColor: { red: 0.973, green: 0.980, blue: 0.988 }
+                  }
+                }
+              }
+            }]
+          })
+        }, interactive).catch(() => {});
+      } catch {}
+    } catch (err) {
+      console.warn('[JobTrack Sheets] applyFormatting issue:', err.message);
     }
   },
   async ensureHeaders(spreadsheetId, sheetName, interactive) {
     try {
+      const sheetInfo = typeof sheetName === 'object' && sheetName.name ? sheetName : await this.resolveSheetInfo(spreadsheetId, sheetName, interactive);
+      const targetName = sheetInfo.name;
       const base = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/`;
-      const allData = await this.api(`${base}${encodeURIComponent(sheetName + '!A1:N')}`, {}, interactive);
+      const allData = await this.api(`${base}${encodeURIComponent(targetName + '!A1:N')}`, {}, interactive);
       let rows = (allData.values || []).filter(r => r && r.length);
       
       // Automatically remove any fake rows logged from logins or navbar badges (e.g., "Welcome, Aman Kumar", "0 notifications")
@@ -87,31 +234,56 @@ JT.sheets = {
         if (idx === 0 && r[0] === 'Company') return true;
         const title = r[1] || '';
         return !/^(welcome|hello|sign in|login|\d+\s*notifications?|notifications?)/i.test(title.trim());
+      }).map((r, idx) => {
+        // Upgrade existing raw URLs to neat clickable hyperlinks
+        if (idx > 0 && r[3] && /^https?:\/\//i.test(r[3])) {
+          r[3] = `=HYPERLINK("${r[3].replace(/"/g, '""')}", "View Job ↗")`;
+        }
+        return r;
       });
 
       if (!cleaned.length) {
-        await this.api(`${base}${encodeURIComponent(sheetName + '!A1:N1')}?valueInputOption=USER_ENTERED`,
+        await this.api(`${base}${encodeURIComponent(targetName + '!A1:N1')}?valueInputOption=USER_ENTERED`,
           { method: 'PUT', body: JSON.stringify({ values: [this.HEADERS] }) }, interactive);
-        return;
+      } else {
+        if (cleaned[0][0] !== 'Company') {
+          cleaned.unshift(this.HEADERS);
+        }
+
+        if (cleaned.length !== rows.length || (rows[0] && cleaned[0][0] !== rows[0][0])) {
+          await this.api(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(targetName + '!A1:N')}:clear`, { method: 'POST' }, interactive).catch(() => {});
+          await this.api(`${base}${encodeURIComponent(targetName + '!A1:N')}?valueInputOption=USER_ENTERED`,
+            { method: 'PUT', body: JSON.stringify({ values: cleaned }) }, interactive);
+        }
       }
 
-      if (cleaned[0][0] !== 'Company') {
-        cleaned.unshift(this.HEADERS);
-      }
-
-      if (cleaned.length !== rows.length || (rows[0] && cleaned[0][0] !== rows[0][0])) {
-        await this.api(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName + '!A1:N')}:clear`, { method: 'POST' }, interactive).catch(() => {});
-        await this.api(`${base}${encodeURIComponent(sheetName + '!A1:N')}?valueInputOption=USER_ENTERED`,
-          { method: 'PUT', body: JSON.stringify({ values: cleaned }) }, interactive);
-      }
+      // Apply executive-grade styling, freeze row 1, custom column widths, and dropdown chips
+      await this.applyFormatting(spreadsheetId, sheetInfo.id, interactive);
     } catch (err) {
       console.warn('[JobTrack Sheets] ensureHeaders issue:', err.message);
     }
   },
   toRow(rec) {
     const c = JT.util.safeCell;
-    return [c(rec.company), c(rec.title), rec.appliedDate, rec.jobLink, 'Applied', c(rec.contact), c(rec.location),
-      c(rec.employmentType), c(rec.experience), c(rec.salary), '', new Date().toISOString(), c(rec.notes), rec.uniqueKey];
+    const linkFormula = rec.jobLink && /^https?:\/\//i.test(rec.jobLink)
+      ? `=HYPERLINK("${rec.jobLink.replace(/"/g, '""')}", "View Job ↗")`
+      : c(rec.jobLink);
+    return [
+      c(rec.company),
+      c(rec.title),
+      rec.appliedDate,
+      linkFormula,
+      'Applied',
+      c(rec.contact),
+      c(rec.location),
+      c(rec.employmentType),
+      c(rec.experience),
+      c(rec.salary),
+      '',
+      new Date().toISOString().replace('T', ' ').slice(0, 19),
+      c(rec.notes),
+      rec.uniqueKey
+    ];
   },
   async sync(rec, st, interactive = false) {
     if (st.webhookUrl) {
@@ -125,8 +297,9 @@ JT.sheets = {
       if (res.status === 'duplicate') return 'duplicate';
       return 'saved';
     }
-    const sheetName = await this.resolveSheetName(st.spreadsheetId, st.sheetName, interactive);
-    await this.ensureHeaders(st.spreadsheetId, sheetName, interactive);
+    const sheetInfo = await this.resolveSheetInfo(st.spreadsheetId, st.sheetName, interactive);
+    const sheetName = sheetInfo.name;
+    await this.ensureHeaders(st.spreadsheetId, sheetInfo, interactive);
 
     const U = JT.util, base = `https://sheets.googleapis.com/v4/spreadsheets/${st.spreadsheetId}/values/`;
     const rng = encodeURIComponent(`${sheetName}!A2:N`);
