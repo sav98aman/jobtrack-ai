@@ -184,8 +184,8 @@ async function handle(m, sender) {
     }
     case 'SYNC_NOW': {
       const st = await settings();
-      const sheetName = await JT.sheets.resolveSheetName(st.spreadsheetId, st.sheetName, true);
-      await JT.sheets.ensureHeaders(st.spreadsheetId, sheetName, true);
+      const sheetInfo = await JT.sheets.resolveSheetInfo(st.spreadsheetId, st.sheetName, true);
+      await JT.sheets.ensureHeaders(st.spreadsheetId, sheetInfo, true);
       await processQueue(true);
       return { ok: true };
     }
