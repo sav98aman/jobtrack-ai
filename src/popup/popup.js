@@ -44,7 +44,38 @@ $('testRow').onclick = async () => {
   }
 };
 $('pause').onclick = async () => { const s = await msg({ type: 'GET_STATE' }); await msg({ type: 'SAVE_SETTINGS', settings: { paused: !s.settings.paused } }); render(); };
+let currentTabUrl = '', detectedInfo = null;
 $('opts').onclick = e => { e.preventDefault(); chrome.runtime.openOptionsPage(); };
+$('addManual').onclick = () => {
+  $('manualBox').style.display = $('manualBox').style.display === 'none' ? 'block' : 'none';
+  if ($('manualBox').style.display === 'block') {
+    if (detectedInfo) {
+      if (detectedInfo.company && !$('manCo').value) $('manCo').value = detectedInfo.company;
+      if (detectedInfo.title && !$('manTitle').value) $('manTitle').value = detectedInfo.title;
+    }
+    $('manCo').focus();
+  }
+};
+$('cancelManual').onclick = () => { $('manualBox').style.display = 'none'; };
+$('saveManual').onclick = async () => {
+  const company = $('manCo').value.trim();
+  const title = $('manTitle').value.trim();
+  if (!company) { $('status').textContent = 'Please enter a company name.'; return; }
+  $('status').textContent = 'Saving application…';
+  const r = await msg({
+    type: 'MANUAL_LOG',
+    record: { company, title: title || 'Job Application', jobLink: currentTabUrl }
+  });
+  if (r.ok) {
+    $('status').textContent = `Saved: ${title || 'Job'} at ${company}`;
+    $('manCo').value = '';
+    $('manTitle').value = '';
+    $('manualBox').style.display = 'none';
+    render();
+  } else {
+    $('status').textContent = 'Save failed: ' + (r.error || 'Unknown error');
+  }
+};
 $('openSheet').onclick = async e => {
   e.preventDefault();
   const s = await msg({ type: 'GET_STATE' });
@@ -52,7 +83,9 @@ $('openSheet').onclick = async e => {
   if (sheetId) chrome.tabs.create({ url: `https://docs.google.com/spreadsheets/d/${sheetId}/edit` });
 };
 chrome.tabs.query({ active: true, currentWindow: true }, ([t]) => {
+  if (t) currentTabUrl = t.url || '';
   chrome.tabs.sendMessage(t.id, { type: 'GET_PAGE_INFO' }, i => {
+    detectedInfo = i;
     $('page').textContent = chrome.runtime.lastError || !i ? 'No job detected on this page.'
       : `${i.company || 'Employer unknown'} — ${i.title || 'title unknown'} (${i.platform})`;
   });

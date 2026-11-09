@@ -259,8 +259,134 @@ JT.sheets = {
 
       // Apply executive-grade styling, freeze row 1, custom column widths, and dropdown chips
       await this.applyFormatting(spreadsheetId, sheetInfo.id, interactive);
+      // Auto-configure the consolidated Dashboard tab
+      await this.setupDashboardTab(spreadsheetId, targetName, interactive);
     } catch (err) {
       console.warn('[JobTrack Sheets] ensureHeaders issue:', err.message);
+    }
+  },
+  async setupDashboardTab(spreadsheetId, appsTabName, interactive) {
+    try {
+      const meta = await this.api(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`, {}, interactive);
+      const sheets = meta.sheets || [];
+      let dashSheet = sheets.find(s => s.properties && s.properties.title && s.properties.title.toLowerCase() === 'dashboard');
+      let dashSheetId = dashSheet && dashSheet.properties.sheetId;
+
+      if (!dashSheet) {
+        const addRes = await this.api(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+          method: 'POST',
+          body: JSON.stringify({ requests: [{ addSheet: { properties: { title: 'Dashboard' } } }] })
+        }, interactive).catch(() => null);
+        dashSheetId = addRes && addRes.replies && addRes.replies[0] && addRes.replies[0].addSheet && addRes.replies[0].addSheet.properties.sheetId;
+      }
+
+      if (dashSheetId == null) return;
+
+      const apps = appsTabName || 'Applications';
+      const dashboardRows = [
+        ['Job Search Analytics & Consolidated Dashboard', '', '', ''],
+        ['', '', '', ''],
+        ['KPI Metric', 'Count', '% of Total', 'Benchmark / Notes'],
+        ['Total Applications', `=COUNTA('${apps}'!A2:A)`, '100%', 'All portals combined'],
+        ['Applications Logged Today', `=COUNTIF('${apps}'!C2:C, TODAY())`, '=IF(B4>0, B5/B4, 0)', 'Daily activity tracker'],
+        ['Call-back & Response Rate', `=COUNTIF('${apps}'!E2:E, "*Interview*") + COUNTIF('${apps}'!E2:E, "*Screening*") + COUNTIF('${apps}'!E2:E, "*Call*")`, '=IF(B4>0, B6/B4, 0)', 'Recruiter response rate'],
+        ['', '', '', ''],
+        ['Pipeline Stage', 'Applications Count', '% of Total Pipeline', 'Action Status'],
+        ['Under Review (Applied)', `=COUNTIF('${apps}'!E2:E, "Applied")`, '=IF($B$4>0, B9/$B$4, 0)', 'Awaiting first response'],
+        ['Screenings & Recruiter Calls', `=COUNTIF('${apps}'!E2:E, "*Screening*") + COUNTIF('${apps}'!E2:E, "*Call*")`, '=IF($B$4>0, B10/$B$4, 0)', 'Initial calls'],
+        ['Technical & Final Interviews', `=COUNTIF('${apps}'!E2:E, "*Interview*")`, '=IF($B$4>0, B11/$B$4, 0)', 'Active interviewing'],
+        ['Assessments & Tests', `=COUNTIF('${apps}'!E2:E, "*Assessment*")`, '=IF($B$4>0, B12/$B$4, 0)', 'Coding / take-home tests'],
+        ['Job Offers Received 🎉', `=COUNTIF('${apps}'!E2:E, "Offer*")`, '=IF($B$4>0, B13/$B$4, 0)', 'Decision stage'],
+        ['Rejected / Archived', `=COUNTIF('${apps}'!E2:E, "Rejected*")`, '=IF($B$4>0, B14/$B$4, 0)', 'Closed'],
+        ['', '', '', ''],
+        ['Portal / Source', 'Applications Count', '% of Total', 'Source Type'],
+        ['LinkedIn', `=COUNTIF('${apps}'!D2:D, "*linkedin*")`, '=IF($B$4>0, B17/$B$4, 0)', 'LinkedIn Easy Apply & Jobs'],
+        ['Hirist / IIMJobs', `=COUNTIF('${apps}'!D2:D, "*hirist*") + COUNTIF('${apps}'!D2:D, "*iimjobs*")`, '=IF($B$4>0, B18/$B$4, 0)', 'Hirist tech jobs'],
+        ['Naukri', `=COUNTIF('${apps}'!D2:D, "*naukri*")`, '=IF($B$4>0, B19/$B$4, 0)', 'Naukri portal'],
+        ['Direct Company Sites / Other', '=$B$4 - B17 - B18 - B19', '=IF($B$4>0, B20/$B$4, 0)', 'Direct Career Sites (ATS)']
+      ];
+
+      const base = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/`;
+      await this.api(`${base}${encodeURIComponent('Dashboard!A1:D20')}?valueInputOption=USER_ENTERED`,
+        { method: 'PUT', body: JSON.stringify({ values: dashboardRows }) }, interactive).catch(() => {});
+
+      const dashReqs = [
+        { updateDimensionProperties: { range: { sheetId: dashSheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 }, properties: { pixelSize: 260 }, fields: 'pixelSize' } },
+        { updateDimensionProperties: { range: { sheetId: dashSheetId, dimension: 'COLUMNS', startIndex: 1, endIndex: 2 }, properties: { pixelSize: 130 }, fields: 'pixelSize' } },
+        { updateDimensionProperties: { range: { sheetId: dashSheetId, dimension: 'COLUMNS', startIndex: 2, endIndex: 3 }, properties: { pixelSize: 130 }, fields: 'pixelSize' } },
+        { updateDimensionProperties: { range: { sheetId: dashSheetId, dimension: 'COLUMNS', startIndex: 3, endIndex: 4 }, properties: { pixelSize: 220 }, fields: 'pixelSize' } },
+        {
+          repeatCell: {
+            range: { sheetId: dashSheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 4 },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor: { red: 0.118, green: 0.161, blue: 0.231 },
+                textFormat: { bold: true, fontSize: 12, foregroundColor: { red: 1, green: 1, blue: 1 } },
+                verticalAlignment: 'MIDDLE'
+              }
+            },
+            fields: 'userEnteredFormat(backgroundColor,textFormat,verticalAlignment)'
+          }
+        },
+        {
+          repeatCell: {
+            range: { sheetId: dashSheetId, startRowIndex: 2, endRowIndex: 3, startColumnIndex: 0, endColumnIndex: 4 },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor: { red: 0.20, green: 0.27, blue: 0.38 },
+                textFormat: { bold: true, fontSize: 10, foregroundColor: { red: 1, green: 1, blue: 1 } },
+                verticalAlignment: 'MIDDLE'
+              }
+            },
+            fields: 'userEnteredFormat(backgroundColor,textFormat,verticalAlignment)'
+          }
+        },
+        {
+          repeatCell: {
+            range: { sheetId: dashSheetId, startRowIndex: 7, endRowIndex: 8, startColumnIndex: 0, endColumnIndex: 4 },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor: { red: 0.20, green: 0.27, blue: 0.38 },
+                textFormat: { bold: true, fontSize: 10, foregroundColor: { red: 1, green: 1, blue: 1 } },
+                verticalAlignment: 'MIDDLE'
+              }
+            },
+            fields: 'userEnteredFormat(backgroundColor,textFormat,verticalAlignment)'
+          }
+        },
+        {
+          repeatCell: {
+            range: { sheetId: dashSheetId, startRowIndex: 15, endRowIndex: 16, startColumnIndex: 0, endColumnIndex: 4 },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor: { red: 0.20, green: 0.27, blue: 0.38 },
+                textFormat: { bold: true, fontSize: 10, foregroundColor: { red: 1, green: 1, blue: 1 } },
+                verticalAlignment: 'MIDDLE'
+              }
+            },
+            fields: 'userEnteredFormat(backgroundColor,textFormat,verticalAlignment)'
+          }
+        },
+        {
+          repeatCell: {
+            range: { sheetId: dashSheetId, startRowIndex: 3, endRowIndex: 20, startColumnIndex: 1, endColumnIndex: 3 },
+            cell: { userEnteredFormat: { horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } },
+            fields: 'userEnteredFormat(horizontalAlignment,verticalAlignment)'
+          }
+        },
+        {
+          repeatCell: {
+            range: { sheetId: dashSheetId, startRowIndex: 3, endRowIndex: 20, startColumnIndex: 2, endColumnIndex: 3 },
+            cell: { userEnteredFormat: { numberFormat: { type: 'PERCENT', pattern: '0.0%' } } },
+            fields: 'userEnteredFormat.numberFormat'
+          }
+        }
+      ];
+
+      await this.api(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+        { method: 'POST', body: JSON.stringify({ requests: dashReqs }) }, interactive).catch(() => {});
+    } catch (err) {
+      console.warn('[JobTrack Sheets] setupDashboardTab issue:', err.message);
     }
   },
   toRow(rec) {
