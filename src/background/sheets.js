@@ -64,7 +64,30 @@ JT.sheets = {
     if (!r.ok) throw new SheetsError(`Sheets API error ${r.status}: ${(await r.text()).slice(0, 160)}`, false);
     return r.json();
   },
-  HEADERS: ['Company', 'Job Title', 'Date Applied', 'Job Link', 'Status', 'Contact', 'Location', 'Employment Type', 'Experience', 'Salary', 'Stage', 'Logged At', 'Notes', 'Unique Key'],
+  HEADERS: ['Company', 'Job Title', 'Date Applied', 'Job Link', 'Status', 'Source Portal', 'Location', 'Employment Type', 'Experience', 'Salary', 'Stage', 'Logged At', 'Notes', 'Unique Key'],
+  inferSourcePortal(url) {
+    if (!url) return 'Company Career Site';
+    const u = String(url).toLowerCase();
+    if (u.includes('linkedin')) return 'LinkedIn';
+    if (u.includes('hirist')) return 'Hirist';
+    if (u.includes('iimjobs')) return 'IIMJobs';
+    if (u.includes('naukri')) return 'Naukri';
+    if (u.includes('indeed')) return 'Indeed';
+    if (u.includes('instahyre')) return 'Instahyre';
+    if (u.includes('foundit')) return 'Foundit (Monster)';
+    if (u.includes('smartrecruiters')) return 'SmartRecruiters';
+    if (u.includes('greenhouse')) return 'Greenhouse';
+    if (u.includes('lever')) return 'Lever';
+    if (u.includes('workday')) return 'Workday';
+    if (u.includes('ashby')) return 'Ashby';
+    try {
+      const raw = url.replace(/^[=HYPERLINK\("]*/i, '').split('"')[0];
+      const h = new URL(raw).hostname.replace(/^www\./, '');
+      return `Career Site (${h})`;
+    } catch {
+      return 'Company Career Site';
+    }
+  },
   async resolveSheetInfo(spreadsheetId, preferredName, interactive) {
     try {
       const meta = await this.api(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`, {}, interactive);
@@ -156,10 +179,10 @@ JT.sheets = {
             fields: 'pixelSize'
           }
         },
-        // 4. Center-align Headers for Date, Link, Status, Work Type, Exp, Salary
+        // 4. Center-align Headers for Date, Link, Status, Source Portal
         {
           repeatCell: {
-            range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 2, endColumnIndex: 5 },
+            range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 2, endColumnIndex: 6 },
             cell: { userEnteredFormat: { horizontalAlignment: 'CENTER' } },
             fields: 'userEnteredFormat.horizontalAlignment'
           }
@@ -171,10 +194,10 @@ JT.sheets = {
             fields: 'userEnteredFormat.horizontalAlignment'
           }
         },
-        // 5. Data rows alignment: Center align Date (col 2), Link (col 3), Status (col 4), Type/Exp/Sal (col 7-10)
+        // 5. Data rows alignment: Center align Date (col 2), Link (col 3), Status (col 4), Portal (col 5)
         {
           repeatCell: {
-            range: { sheetId, startRowIndex: 1, startColumnIndex: 2, endColumnIndex: 5 },
+            range: { sheetId, startRowIndex: 1, startColumnIndex: 2, endColumnIndex: 6 },
             cell: { userEnteredFormat: { horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } },
             fields: 'userEnteredFormat(horizontalAlignment,verticalAlignment)'
           }
@@ -229,15 +252,20 @@ JT.sheets = {
       const allData = await this.api(`${base}${encodeURIComponent(targetName + '!A1:N')}`, {}, interactive);
       let rows = (allData.values || []).filter(r => r && r.length);
       
-      // Automatically remove any fake rows logged from logins or navbar badges (e.g., "Welcome, Aman Kumar", "0 notifications")
+      // Automatically remove any fake rows logged from logins or navbar badges (e.g., "Welcome, Aman Kumar", "0 notifications", "(1 notification)")
       let cleaned = rows.filter((r, idx) => {
         if (idx === 0 && r[0] === 'Company') return true;
         const title = r[1] || '';
-        return !/^(welcome|hello|sign in|login|\d+\s*notifications?|notifications?)/i.test(title.trim());
+        return !/^(welcome|hello|sign in|login|[\(\[]?\d+\s*notifications?[\)\]]?|notifications?)/i.test(title.trim());
       }).map((r, idx) => {
+        if (idx === 0) return this.HEADERS;
         // Upgrade existing raw URLs to neat clickable hyperlinks
-        if (idx > 0 && r[3] && /^https?:\/\//i.test(r[3])) {
+        if (r[3] && /^https?:\/\//i.test(r[3])) {
           r[3] = `=HYPERLINK("${r[3].replace(/"/g, '""')}", "View Job ↗")`;
+        }
+        // Auto-fill Source Portal for existing rows
+        if (!r[5] || r[5] === 'Contact' || r[5].includes('@')) {
+          r[5] = this.inferSourcePortal(r[3]);
         }
         return r;
       });
@@ -400,7 +428,7 @@ JT.sheets = {
       rec.appliedDate,
       linkFormula,
       'Applied',
-      c(rec.contact),
+      c(rec.sourcePortal || this.inferSourcePortal(rec.jobLink)),
       c(rec.location),
       c(rec.employmentType),
       c(rec.experience),

@@ -21,7 +21,7 @@ JT.engine = {
     if (!title || typeof title !== 'string') return false;
     const t = title.trim();
     if (t.length < 2 || t.length > 100) return false;
-    if (/^(welcome|hello|hi|good (morning|afternoon|evening)|sign\s*in|log\s*in|sign\s*up|logout|my\s*(profile|account|applications|dashboard)|dashboard|account|settings|overview|search|careers|jobs|home|application\s*(sent|submitted|received)|thank\s*you|\d+\s*notifications?|notifications?)/i.test(t)) {
+    if (/^(welcome|hello|hi|good (morning|afternoon|evening)|sign\s*in|log\s*in|sign\s*up|logout|my\s*(profile|account|applications|dashboard)|dashboard|account|settings|overview|search|careers|jobs|home|application\s*(sent|submitted|received)|thank\s*you|[\(\[]?\d+\s*notifications?[\)\]]?|notifications?)/i.test(t)) {
       return false;
     }
     return true;
@@ -59,14 +59,42 @@ JT.engine = {
     else if (jobPage(ctx.external)) link = ctx.external.job.canonical || ctx.external.url;
     else if (cur.job && cur.job.canonical) link = cur.job.canonical;
     else { link = cur.url; issues.push('Job link is the confirmation page'); }
-    const portal = ctx.origin && ctx.origin.platformId !== 'generic' ? ctx.origin.platformId
+    const rawPortal = ctx.origin && ctx.origin.platformId !== 'generic' ? ctx.origin.platformId
       : cur.platformId !== 'generic' ? cur.platformId : 'direct';
+    const formatPortal = (pId, u) => {
+      const p = String(pId || '').toLowerCase();
+      if (p === 'linkedin') return 'LinkedIn';
+      if (p === 'hirist') return 'Hirist';
+      if (p === 'iimjobs') return 'IIMJobs';
+      if (p === 'naukri') return 'Naukri';
+      if (p === 'indeed') return 'Indeed';
+      if (p === 'instahyre') return 'Instahyre';
+      if (p === 'foundit') return 'Foundit (Monster)';
+      if (p === 'greenhouse') return 'Greenhouse';
+      if (p === 'lever') return 'Lever';
+      if (p === 'workday') return 'Workday';
+      if (p === 'smartrecruiters') return 'SmartRecruiters';
+      if (p === 'ashby') return 'Ashby';
+      if (u) {
+        try {
+          const h = new URL(u).hostname.replace(/^www\./, '');
+          if (h.includes('linkedin')) return 'LinkedIn';
+          if (h.includes('hirist')) return 'Hirist';
+          if (h.includes('iimjobs')) return 'IIMJobs';
+          if (h.includes('naukri')) return 'Naukri';
+          if (h.includes('indeed')) return 'Indeed';
+          return `Career Site (${h})`;
+        } catch {}
+      }
+      return 'Company Career Site';
+    };
+    const portal = formatPortal(rawPortal, link || cur.url);
     const date = U.todayISO();
     return {
       company, title, appliedDate: date, jobLink: link,
       contact: '', location: pick('location').v, employmentType: pick('employmentType').v,
       experience: pick('experience').v, salary: pick('salary').v,
-      notes: `Auto-tracked by JobTrack AI (source: ${portal}; site: ${U.hostOf(cur.url)})`,
+      notes: `Auto-tracked by JobTrack AI (source: ${rawPortal}; site: ${U.hostOf(cur.url)})`,
       sourcePortal: portal, issues, uniqueKey: U.uniqueKey(company, title, date)
     };
   }

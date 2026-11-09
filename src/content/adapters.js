@@ -111,7 +111,7 @@ JT.adapters = (() => {
     );
     if (titleEl) {
       let t = titleEl.textContent.trim().replace(/\s+/g, ' ');
-      if (t && !/^(application (sent|submitted)|jobs|search|linkedin|apply|apply to .*|\d+\s*notifications?|notifications?)$/i.test(t)) {
+      if (t && !/^(application (sent|submitted)|jobs|search|linkedin|apply|apply to .*|[\(\[]?\d+\s*notifications?[\)\]]?|notifications?)$/i.test(t)) {
         title = t;
       }
     }
@@ -147,7 +147,7 @@ JT.adapters = (() => {
       canonical = 'https://www.linkedin.com/jobs/view/' + mUrl[1] + '/';
     }
 
-    if (title && /^(application (sent|submitted)|jobs|search|linkedin|apply|apply to .*|\d+\s*notifications?|notifications?)$/i.test(title)) title = '';
+    if (title && /^(application (sent|submitted)|jobs|search|linkedin|apply|apply to .*|[\(\[]?\d+\s*notifications?[\)\]]?|notifications?)$/i.test(title)) title = '';
     if (company && isPlatformName(company)) company = '';
 
     return {
@@ -210,7 +210,7 @@ JT.adapters = (() => {
       canonical = location.origin + '/j/' + mJobId[1] + '.html';
     }
 
-    if (title && /^(application (sent|submitted)|jobs|search|hirist|iimjobs|apply|apply to .*|\d+\s*notifications?|notifications?)$/i.test(title)) title = '';
+    if (title && /^(application (sent|submitted)|jobs|search|hirist|iimjobs|apply|apply to .*|[\(\[]?\d+\s*notifications?[\)\]]?|notifications?)$/i.test(title)) title = '';
     if (company && isPlatformName(company)) company = '';
 
     return {
