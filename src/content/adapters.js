@@ -159,6 +159,69 @@ JT.adapters = (() => {
     };
   }
 
+  function extractHiristJob() {
+    let company = '', title = '', locationStr = '', canonical = '';
+
+    // 1. Breadcrumb check (works on both job details page and the /job/applied confirmation page!)
+    // e.g. "Home > Backend Development > True Balance - Java Backend Engineer - Spring Frameworks"
+    const breadcrumbEl = document.querySelector('nav[aria-label="breadcrumb"], .breadcrumb, [class*="breadcrumb"], .bread-crumb, ol[class*="breadcrumb"]');
+    if (breadcrumbEl) {
+      const parts = (breadcrumbEl.innerText || '').split('>').map(s => s.trim()).filter(Boolean);
+      if (parts.length) {
+        const last = parts[parts.length - 1];
+        const m = last.match(/^([A-Za-z0-9&.,' /()-]+?)\s+-\s+(.+)$/);
+        if (m && !isPlatformName(m[1])) {
+          company = m[1].trim();
+          title = m[2].trim();
+        }
+      }
+    }
+
+    // 2. Page selectors if breadcrumb didn't have both
+    if (!company) {
+      const compEl = document.querySelector('[class*="company-name"] a, [class*="company-name"], [class*="recruiter-name"], [class*="comp-name"], a[href*="/c/"], .recruiter-company');
+      if (compEl) {
+        let t = compEl.textContent.trim().replace(/\s+/g, ' ');
+        if (t && !isPlatformName(t)) company = t;
+      }
+    }
+
+    if (!title) {
+      const titleEl = document.querySelector('[class*="job-title"] h1, [class*="job-title"], h1');
+      if (titleEl) {
+        let t = titleEl.textContent.trim().replace(/\s+/g, ' ');
+        if (t && JT.engine.isValidJobTitle(t)) title = t;
+      }
+    }
+
+    // 3. Document title fallback
+    if (!company || !title) {
+      const dt = (document.title || '').replace(/\s*\|\s*(Hirist|iimjobs).*$/i, '').trim();
+      const m = dt.match(/^([A-Za-z0-9&.,' /()-]+?)\s+-\s+(.+)$/);
+      if (m && !isPlatformName(m[1])) {
+        if (!company) company = m[1].trim();
+        if (!title && JT.engine.isValidJobTitle(m[2])) title = m[2].trim();
+      }
+    }
+
+    // 4. Job link
+    const mJobId = location.search.match(/[?&]jobId=(\d+)/) || location.pathname.match(/\/j\/.*?(\d+)\.html/);
+    if (mJobId && mJobId[1]) {
+      canonical = location.origin + '/j/' + mJobId[1] + '.html';
+    }
+
+    if (title && /^(application (sent|submitted)|jobs|search|hirist|iimjobs|apply|apply to .*|\d+\s*notifications?|notifications?)$/i.test(title)) title = '';
+    if (company && isPlatformName(company)) company = '';
+
+    return {
+      company: company.trim(),
+      title: title.trim(),
+      location: locationStr,
+      canonical: canonical || location.href,
+      employerSource: company ? 'page' : ''
+    };
+  }
+
   function extractJob() {
     const p = detectPlatform(), ld = jsonLdJob(), job = { employerSource: '' };
     let company = '', title = '', locationStr = '', canonical = '';
@@ -169,6 +232,12 @@ JT.adapters = (() => {
       if (li.title) { title = li.title; }
       if (li.location) locationStr = li.location;
       if (li.canonical) canonical = li.canonical;
+    } else if (p.id === 'hirist' || p.id === 'iimjobs') {
+      const hj = extractHiristJob();
+      if (hj.company) { company = hj.company; job.employerSource = hj.employerSource || 'page'; }
+      if (hj.title) { title = hj.title; }
+      if (hj.location) locationStr = hj.location;
+      if (hj.canonical) canonical = hj.canonical;
     }
 
     if (!company) {
