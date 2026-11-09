@@ -189,6 +189,27 @@ async function handle(m, sender) {
       await processQueue(true);
       return { ok: true };
     }
+    case 'MANUAL_LOG': {
+      const date = JT.util.todayISO();
+      const rec = m.record || {};
+      const record = {
+        company: rec.company || 'Unknown Employer',
+        title: rec.title || 'Job Application',
+        appliedDate: rec.appliedDate || date,
+        jobLink: rec.jobLink || '',
+        contact: rec.contact || '',
+        location: rec.location || '',
+        employmentType: rec.employmentType || '',
+        experience: rec.experience || '',
+        salary: rec.salary || '',
+        notes: rec.notes || 'Manually logged via JobTrack AI popup',
+        sourcePortal: 'manual',
+        issues: [],
+        uniqueKey: JT.util.uniqueKey(rec.company || 'Unknown', rec.title || 'Job', date)
+      };
+      await enqueue(record);
+      return { ok: true };
+    }
     case 'SAVE_SETTINGS': await loc.set({ settings: { ...(await settings()), ...m.settings } }); return { ok: true };
     case 'REVIEW': {
       const reviews = await get('reviews', []), r = reviews.find(x => x.id === m.id); if (!r) return { ok: false };
