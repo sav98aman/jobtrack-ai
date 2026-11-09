@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../ui.css"></head>
+<body class="options"><h1>JobTrack AI settings</h1>
+
+<h2>Connection Options</h2>
+<p class="muted">Use either <b>Method A (Google Cloud OAuth)</b> or <b>Method B (Apps Script Web App — No Google Cloud setup required)</b>.</p>
+
+<details open>
+  <summary style="font-weight:600;cursor:pointer;margin:10px 0 6px;">Method A: Google Cloud OAuth</summary>
+  <label>Google OAuth Client ID (Web application)
+    <input id="clientId" placeholder="123456789-abcdef.apps.googleusercontent.com">
+  </label>
+  <label>Authorized Redirect URI (copy to Google Cloud Console)
+    <input id="redirectUri" readonly style="opacity:0.8;cursor:text;">
+  </label>
+  <label>Spreadsheet ID<input id="spreadsheetId"></label>
+</details>
+
+<details open style="margin-top:14px;">
+  <summary style="font-weight:600;cursor:pointer;margin:10px 0 6px;">Method B: Google Apps Script Web App (Easiest)</summary>
+  <label>Apps Script Web App URL
+    <input id="webhookUrl" placeholder="https://script.google.com/macros/s/.../exec">
+  </label>
+  <p class="muted" style="margin:4px 0 8px;">If filled, this bypasses Google Cloud OAuth completely. Data is posted directly to your Sheet.</p>
+</details>
+
+<h2 style="margin-top:18px;">Preferences</h2>
+<label>Applications tab name<input id="sheetName" placeholder="Applications"></label>
+<label class="check"><input type="checkbox" id="autoDetect"> Detect submissions automatically</label>
+<label class="check"><input type="checkbox" id="autoSave"> Save high-confidence applications without asking</label>
+<label class="check"><input type="checkbox" id="alwaysConfirm"> Always ask me to confirm first</label>
+<button id="save">Save settings</button> <span id="ok" class="muted"></span>
+<h2>What this extension reads</h2>
+<p class="muted">Job title, employer, location and URL from pages you visit, plus visible confirmation text. It never reads passwords, CV contents or form answers, and sends data only to your own Google Sheet.</p>
+<script src="options.js"></script></body></html>
