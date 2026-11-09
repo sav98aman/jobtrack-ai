@@ -64,6 +64,26 @@ JT.sheets = {
     if (!r.ok) throw new SheetsError(`Sheets API error ${r.status}: ${(await r.text()).slice(0, 160)}`, false);
     return r.json();
   },
+  async createSpreadsheet(interactive = true) {
+    const payload = {
+      properties: { title: 'JobTrack AI - Job Application Tracker' },
+      sheets: [
+        { properties: { title: 'Applications', gridProperties: { frozenRowCount: 1 } } },
+        { properties: { title: 'Dashboard' } }
+      ]
+    };
+    const res = await this.api('https://sheets.googleapis.com/v4/spreadsheets', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }, interactive);
+    const newId = res.spreadsheetId;
+    if (!newId) throw new SheetsError('Failed to create new spreadsheet in Google Drive', false);
+    
+    // Auto-initialize both tabs immediately
+    const sheetInfo = { name: 'Applications', id: (res.sheets && res.sheets[0] && res.sheets[0].properties && res.sheets[0].properties.sheetId) || 0 };
+    await this.ensureHeaders(newId, sheetInfo, interactive);
+    return newId;
+  },
   HEADERS: ['Company', 'Job Title', 'Date Applied', 'Job Link', 'Status', 'Source Portal', 'Location', 'Employment Type', 'Experience', 'Salary', 'Stage', 'Logged At', 'Notes', 'Unique Key'],
   inferSourcePortal(url) {
     if (!url) return 'Company Career Site';

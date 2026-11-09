@@ -1,6 +1,6 @@
 importScripts('../shared/util.js', '../shared/engine.js', 'sheets.js');
 const CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
-const DEFAULTS = { clientId: CLIENT_ID, spreadsheetId: 'YOUR_SPREADSHEET_ID', sheetName: 'Applications',
+const DEFAULTS = { clientId: CLIENT_ID, spreadsheetId: '', sheetName: 'Applications',
   autoDetect: true, autoSave: true, alwaysConfirm: false, paused: false };
 const TTL = 3 * 3600e3, U = JT.util, ses = chrome.storage.session, loc = chrome.storage.local;
 const settings = async () => {
@@ -157,7 +157,20 @@ async function handle(m, sender) {
       const isConnected = !!(auth.token && auth.exp > Date.now());
       return { isConnected, settings: await settings(), queue: await get('queue', []), reviews: await get('reviews', []), history: await get('history', []) };
     }
-    case 'CONNECT': try { await JT.sheets.token(true); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
+    case 'CONNECT': {
+      try {
+        await JT.sheets.token(true);
+        const st = await settings();
+        if (!st.spreadsheetId && !st.webhookUrl) {
+          const newSheetId = await JT.sheets.createSpreadsheet(true);
+          st.spreadsheetId = newSheetId;
+          await loc.set({ settings: st });
+        }
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
+    }
     case 'TEST_SYNC': {
       try {
         const st = await settings();

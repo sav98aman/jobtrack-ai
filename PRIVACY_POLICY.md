@@ -45,3 +45,4 @@ We do not sell, rent, trade, or share your data with any third parties. Data is 
 ### 6. Contact Us
 
 If you have any questions about this Privacy Policy, please contact the developer via the GitHub repository or support channels.
+
