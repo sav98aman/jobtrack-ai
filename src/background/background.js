@@ -247,18 +247,29 @@ async function handle(m, sender) {
       if (m.accept) { Object.assign(r.record, m.edits || {}); r.record.uniqueKey = U.uniqueKey(r.record.company, r.record.title, r.record.appliedDate); await enqueue(r.record); }
       return { ok: true };
     }
+    case 'SAVE_SHEET_ID': {
+      const st = await settings();
+      st.spreadsheetId = m.spreadsheetId || '';
+      await loc.set({ settings: st });
+      return { ok: true, spreadsheetId: st.spreadsheetId };
+    }
     case 'GET_APPLICATIONS': {
       const cached = (await loc.get('cachedApplications')).cachedApplications || [];
       const st = await settings();
+      if (m.spreadsheetId && m.spreadsheetId !== st.spreadsheetId) {
+        st.spreadsheetId = m.spreadsheetId;
+        await loc.set({ settings: st });
+      }
       if (!st.spreadsheetId) {
         return { ok: true, source: 'cache', applications: cached, spreadsheetId: '' };
       }
+      const interactive = !!m.interactive;
       try {
-        const sheetInfo = await JT.sheets.resolveSheetInfo(st.spreadsheetId, st.sheetName, false);
+        const sheetInfo = await JT.sheets.resolveSheetInfo(st.spreadsheetId, st.sheetName, interactive);
         const sheetName = sheetInfo.name;
         const base = `https://sheets.googleapis.com/v4/spreadsheets/${st.spreadsheetId}/values/`;
         const rng = encodeURIComponent(`${sheetName}!A2:N`);
-        const data = await JT.sheets.api(`${base}${rng}?valueRenderOption=FORMULA`, {}, false);
+        const data = await JT.sheets.api(`${base}${rng}?valueRenderOption=FORMULA`, {}, interactive);
         const rows = data.values || [];
         const extractUrl = val => {
           if (!val) return '';
@@ -286,7 +297,7 @@ async function handle(m, sender) {
         await loc.set({ cachedApplications: applications });
         return { ok: true, source: 'sheets', spreadsheetId: st.spreadsheetId, applications };
       } catch (e) {
-        return { ok: true, source: 'cache', applications: cached, spreadsheetId: st.spreadsheetId, error: e.message };
+        return { ok: false, source: 'cache', applications: cached, spreadsheetId: st.spreadsheetId, error: e.message };
       }
     }
     case 'UPDATE_STATUS': {

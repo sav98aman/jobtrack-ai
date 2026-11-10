@@ -49,24 +49,34 @@
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
 
-  async function loadData() {
+  function parseSheetId(input) {
+    if (!input) return '';
+    const match = input.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+    if (match) return match[1];
+    return input.trim();
+  }
+
+  async function loadData(interactive = false) {
     $('connStatus').textContent = 'Fetching applications…';
     try {
-      const res = await chrome.runtime.sendMessage({ type: 'GET_APPLICATIONS' });
+      const res = await chrome.runtime.sendMessage({ type: 'GET_APPLICATIONS', interactive: !!interactive });
       if (res && res.ok) {
         rawApplications = res.applications || [];
         spreadsheetId = res.spreadsheetId || '';
 
         if (spreadsheetId) {
+          $('connectBanner').style.display = 'none';
           $('connStatus').innerHTML = `Synced with Google Sheets (${rawApplications.length} total) <span style="color:#10B981">● Connected</span>`;
           $('openSheetLink').href = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
           $('openSheetLink').style.display = 'inline-flex';
         } else {
+          $('connectBanner').style.display = 'flex';
           $('connStatus').innerHTML = `Local Mode (${rawApplications.length} saved) · Connect Google in Extension Settings to sync live`;
           $('openSheetLink').style.display = 'none';
         }
       } else {
-        $('connStatus').textContent = 'Offline (Showing cached applications)';
+        $('connectBanner').style.display = 'flex';
+        $('connStatus').textContent = res && res.error ? `Sync notice: ${res.error}` : 'Offline (Showing cached applications)';
       }
     } catch (e) {
       $('connStatus').textContent = 'Unable to reach extension background worker.';
@@ -285,8 +295,31 @@
   });
 
   $('refreshBtn').addEventListener('click', () => {
-    loadData();
+    loadData(true);
     showToast('Refreshed application list');
+  });
+
+  $('saveSheetBtn').addEventListener('click', async () => {
+    const raw = $('sheetInput').value.trim();
+    const id = parseSheetId(raw);
+    if (!id) {
+      showToast('Please enter a valid Google Sheet URL or ID', '⚠️');
+      return;
+    }
+    showToast('Connecting spreadsheet…');
+    await chrome.runtime.sendMessage({ type: 'SAVE_SHEET_ID', spreadsheetId: id });
+    loadData(true);
+  });
+
+  $('authBtn').addEventListener('click', async () => {
+    showToast('Signing in with Google…');
+    const r = await chrome.runtime.sendMessage({ type: 'CONNECT' });
+    if (r && r.ok) {
+      showToast('Connected to Google!', '✓');
+      loadData(true);
+    } else {
+      showToast(`Login failed: ${r ? r.error : 'Unknown'}`, '✗');
+    }
   });
 
   $('exportCsvBtn').addEventListener('click', exportCSV);
