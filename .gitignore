@@ -4,3 +4,11 @@ node_modules/
 *.log
 *.zip
 
+# Local configuration & credentials (NEVER commit)
+src/config.local.js
+config.local.js
+*.local.js
+*.local.json
+.env
+.env.local
+credentials/

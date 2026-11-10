@@ -1,11 +1,13 @@
 importScripts('../shared/util.js', '../shared/engine.js', 'sheets.js');
-const CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+try { importScripts('../config.local.js'); } catch (e) {}
+try { importScripts('config.local.js'); } catch (e) {}
+const CLIENT_ID = (typeof self !== 'undefined' && self.LOCAL_CONFIG && self.LOCAL_CONFIG.CLIENT_ID) || '';
 const DEFAULTS = { clientId: CLIENT_ID, spreadsheetId: '', sheetName: 'Applications',
   autoDetect: true, autoSave: true, alwaysConfirm: false, paused: false };
 const TTL = 3 * 3600e3, U = JT.util, ses = chrome.storage.session, loc = chrome.storage.local;
 const settings = async () => {
   const s = (await loc.get('settings')).settings || {};
-  if (!s.clientId || s.clientId.includes('YOUR_OLD_CLIENT_ID')) {
+  if (!s.clientId && CLIENT_ID) {
     s.clientId = CLIENT_ID;
     await loc.set({ settings: { ...DEFAULTS, ...s } });
   }

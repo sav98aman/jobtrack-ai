@@ -4,11 +4,8 @@ if (redirectUriEl && chrome.identity && chrome.identity.getRedirectURL) {
   redirectUriEl.value = chrome.identity.getRedirectURL();
 }
 chrome.runtime.sendMessage({ type: 'GET_STATE' }, s => {
-  ids.forEach(i => document.getElementById(i).value = s.settings[i] ?? '');
-  if (!document.getElementById('clientId').value || document.getElementById('clientId').value.includes('YOUR_OLD_CLIENT_ID')) {
-    document.getElementById('clientId').value = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
-  }
-  flags.forEach(i => document.getElementById(i).checked = !!s.settings[i]);
+  ids.forEach(i => document.getElementById(i).value = (s && s.settings && s.settings[i]) ?? '');
+  flags.forEach(i => document.getElementById(i).checked = !!(s && s.settings && s.settings[i]));
 });
 document.getElementById('save').onclick = () => {
   const st = {};
