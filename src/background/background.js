@@ -1,16 +1,9 @@
 importScripts('../shared/util.js', '../shared/engine.js', 'sheets.js');
-try { importScripts('../config.local.js'); } catch (e) {}
-try { importScripts('config.local.js'); } catch (e) {}
-const CLIENT_ID = (typeof self !== 'undefined' && self.LOCAL_CONFIG && self.LOCAL_CONFIG.CLIENT_ID) || '';
-const DEFAULTS = { clientId: CLIENT_ID, spreadsheetId: '', sheetName: 'Applications',
+const DEFAULTS = { clientId: '', spreadsheetId: '', sheetName: 'Applications',
   autoDetect: true, autoSave: true, alwaysConfirm: false, paused: false };
 const TTL = 3 * 3600e3, U = JT.util, ses = chrome.storage.session, loc = chrome.storage.local;
 const settings = async () => {
   const s = (await loc.get('settings')).settings || {};
-  if (!s.clientId && CLIENT_ID) {
-    s.clientId = CLIENT_ID;
-    await loc.set({ settings: { ...DEFAULTS, ...s } });
-  }
   return { ...DEFAULTS, ...s };
 };
 const getCtx = async id => { const k = 'ctx:' + id, c = (await ses.get(k))[k]; if (c && Date.now() - c.updatedAt > TTL) { await ses.remove(k); return null; } return c || null; };
