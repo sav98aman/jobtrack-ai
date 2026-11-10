@@ -461,15 +461,24 @@ JT.sheets = {
   },
   async sync(rec, st, interactive = false) {
     if (st.webhookUrl) {
-      const resp = await fetch(st.webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'append', sheetName: st.sheetName || 'Applications', values: [this.toRow(rec)], record: rec })
-      });
-      if (!resp.ok) throw new SheetsError(`Webhook error ${resp.status}`, false);
-      const res = await resp.json().catch(() => ({}));
-      if (res.status === 'duplicate') return 'duplicate';
-      return 'saved';
+      if (st.webhookUrl.includes('docs.google.com/spreadsheets')) {
+        const m = st.webhookUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+        if (m) st.spreadsheetId = m[1];
+        st.webhookUrl = '';
+      } else {
+        const resp = await fetch(st.webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'append', sheetName: st.sheetName || 'Applications', values: [this.toRow(rec)], record: rec })
+        });
+        if (!resp.ok) {
+          const body = (await resp.text().catch(() => '')).slice(0, 100);
+          throw new SheetsError(`Webhook error ${resp.status}${body ? ': ' + body : ''}`, false);
+        }
+        const res = await resp.json().catch(() => ({}));
+        if (res.status === 'duplicate') return 'duplicate';
+        return 'saved';
+      }
     }
     const sheetInfo = await this.resolveSheetInfo(st.spreadsheetId, st.sheetName, interactive);
     const sheetName = sheetInfo.name;

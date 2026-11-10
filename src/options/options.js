@@ -15,6 +15,21 @@ document.getElementById('save').onclick = () => {
       val += '.apps.googleusercontent.com';
       document.getElementById('clientId').value = val;
     }
+    // Auto-detect: if a Google Sheet URL was pasted into spreadsheetId or webhookUrl
+    if ((i === 'spreadsheetId' || i === 'webhookUrl') && val && val.includes('docs.google.com/spreadsheets')) {
+      const match = val.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+      if (match) {
+        if (i === 'webhookUrl') {
+          st.spreadsheetId = match[1];
+          document.getElementById('spreadsheetId').value = match[1];
+          val = '';
+          document.getElementById('webhookUrl').value = '';
+        } else {
+          val = match[1];
+          document.getElementById('spreadsheetId').value = val;
+        }
+      }
+    }
     st[i] = val;
   });
   flags.forEach(i => st[i] = document.getElementById(i).checked);

@@ -4,6 +4,24 @@ const DEFAULTS = { clientId: '', spreadsheetId: '', sheetName: 'Applications',
 const TTL = 3 * 3600e3, U = JT.util, ses = chrome.storage.session, loc = chrome.storage.local;
 const settings = async () => {
   const s = (await loc.get('settings')).settings || {};
+  let changed = false;
+  // Auto-heal: If user pasted a Google Sheet link into webhookUrl, move it to spreadsheetId
+  if (s.webhookUrl && s.webhookUrl.includes('docs.google.com/spreadsheets')) {
+    const m = s.webhookUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+    if (m) {
+      s.spreadsheetId = m[1];
+    }
+    s.webhookUrl = '';
+    changed = true;
+  }
+  // Auto-heal: If webhookUrl ends with /edit in Apps Script, replace with /exec
+  if (s.webhookUrl && s.webhookUrl.includes('script.google.com') && s.webhookUrl.endsWith('/edit')) {
+    s.webhookUrl = s.webhookUrl.replace(/\/edit$/, '/exec');
+    changed = true;
+  }
+  if (changed) {
+    await loc.set({ settings: { ...DEFAULTS, ...s } });
+  }
   return { ...DEFAULTS, ...s };
 };
 const getCtx = async id => { const k = 'ctx:' + id, c = (await ses.get(k))[k]; if (c && Date.now() - c.updatedAt > TTL) { await ses.remove(k); return null; } return c || null; };
