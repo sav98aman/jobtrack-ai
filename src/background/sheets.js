@@ -461,7 +461,7 @@ JT.sheets = {
   },
   async sync(rec, st, interactive = false) {
     if (st.webhookUrl) {
-      if (st.webhookUrl.includes('docs.google.com/spreadsheets')) {
+      if (st.webhookUrl.includes('/home/projects/') || st.webhookUrl.includes('docs.google.com/spreadsheets')) {
         const m = st.webhookUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
         if (m) st.spreadsheetId = m[1];
         st.webhookUrl = '';

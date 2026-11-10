@@ -5,8 +5,8 @@ const TTL = 3 * 3600e3, U = JT.util, ses = chrome.storage.session, loc = chrome.
 const settings = async () => {
   const s = (await loc.get('settings')).settings || {};
   let changed = false;
-  // Auto-heal: If user pasted a Google Sheet link into webhookUrl, move it to spreadsheetId
-  if (s.webhookUrl && s.webhookUrl.includes('docs.google.com/spreadsheets')) {
+  // Auto-heal: If user pasted a Google Sheet link or editor link into webhookUrl, clear it
+  if (s.webhookUrl && (s.webhookUrl.includes('docs.google.com/spreadsheets') || s.webhookUrl.includes('/home/projects/'))) {
     const m = s.webhookUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
     if (m) {
       s.spreadsheetId = m[1];
