@@ -68,6 +68,28 @@ async function processQueue(interactive) {
         it.done = true;
         await logHistory({ ok: true, result: res, company: it.record.company, title: it.record.title });
         if (res === 'saved') notify('Application saved', `${it.record.title} at ${it.record.company}`);
+        try {
+          let cached = (await loc.get('cachedApplications')).cachedApplications || [];
+          if (!cached.some(c => c.uniqueKey === it.record.uniqueKey)) {
+            cached.unshift({
+              company: it.record.company,
+              title: it.record.title,
+              appliedDate: it.record.appliedDate,
+              jobLink: it.record.jobLink,
+              status: it.record.status || 'Applied',
+              sourcePortal: it.record.sourcePortal || 'Direct',
+              location: it.record.location || '',
+              employmentType: it.record.employmentType || '',
+              experience: it.record.experience || '',
+              salary: it.record.salary || '',
+              stage: it.record.stage || '',
+              loggedAt: new Date().toISOString(),
+              notes: it.record.notes || '',
+              uniqueKey: it.record.uniqueKey
+            });
+            await loc.set({ cachedApplications: cached.slice(0, 500) });
+          }
+        } catch {}
       } catch (e) {
         it.attempts++; it.lastError = e.message;
         if (e.transient) { it.blocked = false; it.nextAt = Date.now() + Math.min(2 ** it.attempts * 30e3, 30 * 60e3); }
@@ -230,6 +252,77 @@ async function handle(m, sender) {
       const reviews = await get('reviews', []), r = reviews.find(x => x.id === m.id); if (!r) return { ok: false };
       await loc.set({ reviews: reviews.filter(x => x.id !== m.id) }); await badge();
       if (m.accept) { Object.assign(r.record, m.edits || {}); r.record.uniqueKey = U.uniqueKey(r.record.company, r.record.title, r.record.appliedDate); await enqueue(r.record); }
+      return { ok: true };
+    }
+    case 'GET_APPLICATIONS': {
+      const cached = (await loc.get('cachedApplications')).cachedApplications || [];
+      const st = await settings();
+      if (!st.spreadsheetId) {
+        return { ok: true, source: 'cache', applications: cached, spreadsheetId: '' };
+      }
+      try {
+        const sheetInfo = await JT.sheets.resolveSheetInfo(st.spreadsheetId, st.sheetName, false);
+        const sheetName = sheetInfo.name;
+        const base = `https://sheets.googleapis.com/v4/spreadsheets/${st.spreadsheetId}/values/`;
+        const rng = encodeURIComponent(`${sheetName}!A2:N`);
+        const data = await JT.sheets.api(`${base}${rng}?valueRenderOption=FORMULA`, {}, false);
+        const rows = data.values || [];
+        const extractUrl = val => {
+          if (!val) return '';
+          const match = String(val).match(/=HYPERLINK\("([^"]+)"/i);
+          return match ? match[1] : (String(val).startsWith('http') ? String(val) : '');
+        };
+        const applications = rows.map((r, idx) => ({
+          rowIndex: idx + 2,
+          company: r[0] || '',
+          title: r[1] || '',
+          appliedDate: r[2] || '',
+          jobLink: extractUrl(r[3]),
+          status: r[4] || 'Applied',
+          sourcePortal: r[5] || 'Direct',
+          location: r[6] || '',
+          employmentType: r[7] || '',
+          experience: r[8] || '',
+          salary: r[9] || '',
+          stage: r[10] || '',
+          loggedAt: r[11] || '',
+          notes: r[12] || '',
+          uniqueKey: r[13] || ''
+        })).filter(a => a.company && a.company !== 'Company');
+
+        await loc.set({ cachedApplications: applications });
+        return { ok: true, source: 'sheets', spreadsheetId: st.spreadsheetId, applications };
+      } catch (e) {
+        return { ok: true, source: 'cache', applications: cached, spreadsheetId: st.spreadsheetId, error: e.message };
+      }
+    }
+    case 'UPDATE_STATUS': {
+      const { rowIndex, status, uniqueKey } = m;
+      const st = await settings();
+      let cached = (await loc.get('cachedApplications')).cachedApplications || [];
+      cached = cached.map(c => {
+        if ((rowIndex && c.rowIndex === rowIndex) || (uniqueKey && c.uniqueKey === uniqueKey)) {
+          return { ...c, status };
+        }
+        return c;
+      });
+      await loc.set({ cachedApplications: cached });
+
+      if (st.spreadsheetId && rowIndex) {
+        try {
+          const sheetInfo = await JT.sheets.resolveSheetInfo(st.spreadsheetId, st.sheetName, false);
+          const sheetName = sheetInfo.name;
+          const base = `https://sheets.googleapis.com/v4/spreadsheets/${st.spreadsheetId}/values/`;
+          const rng = encodeURIComponent(`${sheetName}!E${rowIndex}`);
+          await JT.sheets.api(`${base}${rng}?valueInputOption=USER_ENTERED`, {
+            method: 'PUT',
+            body: JSON.stringify({ range: `${sheetName}!E${rowIndex}`, values: [[status]] })
+          }, false);
+          return { ok: true };
+        } catch (e) {
+          return { ok: false, error: e.message };
+        }
+      }
       return { ok: true };
     }
   }

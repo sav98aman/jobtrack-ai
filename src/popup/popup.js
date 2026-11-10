@@ -46,6 +46,7 @@ $('testRow').onclick = async () => {
 $('pause').onclick = async () => { const s = await msg({ type: 'GET_STATE' }); await msg({ type: 'SAVE_SETTINGS', settings: { paused: !s.settings.paused } }); render(); };
 let currentTabUrl = '', detectedInfo = null;
 $('opts').onclick = e => { e.preventDefault(); chrome.runtime.openOptionsPage(); };
+$('openDashboard').onclick = () => { chrome.tabs.create({ url: chrome.runtime.getURL('src/dashboard/dashboard.html') }); };
 $('addManual').onclick = () => {
   $('manualBox').style.display = $('manualBox').style.display === 'none' ? 'block' : 'none';
   if ($('manualBox').style.display === 'block') {

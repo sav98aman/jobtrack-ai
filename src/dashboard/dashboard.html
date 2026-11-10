@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>JobTrack AI — Applications Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="icon" type="image/png" href="../../icons/icon48.png">
+</head>
+<body>
+  <div class="dashboard-container">
+    <!-- Top Header -->
+    <header class="dashboard-header">
+      <div class="brand-section">
+        <img src="../../icons/icon48.png" alt="JobTrack AI" class="brand-logo">
+        <div class="brand-title">
+          <h1>JobTrack AI <span class="version-badge">v1.5.0</span></h1>
+          <p class="brand-subtitle" id="connStatus">Connecting to application database…</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="refreshBtn" class="btn" title="Refresh applications">
+          <span>🔄</span> Refresh
+        </button>
+        <button id="exportCsvBtn" class="btn" title="Download all records as CSV">
+          <span>📥</span> Export CSV
+        </button>
+        <a id="openSheetLink" href="#" class="btn" target="_blank" style="display:none;">
+          <span>📊</span> Open Google Sheet ↗
+        </a>
+        <button id="openAddModalBtn" class="btn btn-primary">
+          <span>+</span> Add Application
+        </button>
+      </div>
+    </header>
+
+    <!-- Metrics Cards Grid -->
+    <section class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-header">
+          <span class="metric-title">Total Applications</span>
+          <span class="metric-icon">📋</span>
+        </div>
+        <div class="metric-value" id="kpiTotal">0</div>
+        <div class="metric-sub">Confirmed job submissions</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-header">
+          <span class="metric-title">Applied Today</span>
+          <span class="metric-icon">⚡</span>
+        </div>
+        <div class="metric-value" id="kpiToday" style="color:var(--accent-cyan);">0</div>
+        <div class="metric-sub">Logged in past 24 hours</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-header">
+          <span class="metric-title">Active Pipeline</span>
+          <span class="metric-icon">🎯</span>
+        </div>
+        <div class="metric-value" id="kpiPipeline" style="color:var(--accent-amber);">0</div>
+        <div class="metric-sub">Screening, Interview, or Offer</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-header">
+          <span class="metric-title">Response Rate</span>
+          <span class="metric-icon">📈</span>
+        </div>
+        <div class="metric-value" id="kpiResponseRate" style="color:var(--accent-emerald);">0%</div>
+        <div class="metric-sub">Moved beyond initial Applied</div>
+      </div>
+    </section>
+
+    <!-- Status Tabs -->
+    <div class="status-tabs" id="statusTabs">
+      <button class="tab-btn active" data-status="All">All <span id="cntAll">(0)</span></button>
+      <button class="tab-btn" data-status="Applied">Applied <span id="cntApplied">(0)</span></button>
+      <button class="tab-btn" data-status="Screening">Screening <span id="cntScreening">(0)</span></button>
+      <button class="tab-btn" data-status="Interviewing">Interviewing <span id="cntInterviewing">(0)</span></button>
+      <button class="tab-btn" data-status="Offer">Offer <span id="cntOffer">(0)</span></button>
+      <button class="tab-btn" data-status="Rejected">Rejected <span id="cntRejected">(0)</span></button>
+    </div>
+
+    <!-- Search & Filter Toolbar -->
+    <div class="toolbar">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" class="search-input" placeholder="Search by company, job title, or location…">
+      </div>
+      <div class="filters-group">
+        <select id="portalFilter" class="select-filter">
+          <option value="All">All Portals</option>
+          <option value="LinkedIn">LinkedIn</option>
+          <option value="Hirist">Hirist</option>
+          <option value="Naukri">Naukri</option>
+          <option value="Career Site">Career Sites</option>
+          <option value="Direct">Direct / Other</option>
+        </select>
+        <select id="sortFilter" class="select-filter">
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+          <option value="company">Company (A-Z)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Main Table Container -->
+    <div class="table-card">
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:26%;">Company</th>
+              <th style="width:28%;">Job Title</th>
+              <th style="width:14%;">Source Portal</th>
+              <th style="width:12%;">Date Applied</th>
+              <th style="width:12%;">Status</th>
+              <th style="width:8%;text-align:right;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="appTableBody">
+            <!-- Dynamic Rows Injected Here -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Empty State -->
+      <div id="emptyState" class="empty-state" style="display:none;">
+        <div class="empty-icon">📭</div>
+        <div class="empty-title">No applications found</div>
+        <p class="empty-desc">No applications match your search filters, or you haven't applied to any jobs yet.</p>
+        <button id="emptyAddBtn" class="btn btn-primary">+ Add Your First Application</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Application Modal -->
+  <div id="addModal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Add Job Application</h2>
+        <button id="closeModalBtn" class="close-btn">&times;</button>
+      </div>
+      <form id="addAppForm">
+        <div class="form-group">
+          <label for="modalCompany">Company Name *</label>
+          <input type="text" id="modalCompany" class="form-input" placeholder="e.g. Google, Deloitte, Microsoft" required>
+        </div>
+        <div class="form-group">
+          <label for="modalTitle">Job Title *</label>
+          <input type="text" id="modalTitle" class="form-input" placeholder="e.g. Senior Software Engineer" required>
+        </div>
+        <div class="form-group">
+          <label for="modalPortal">Source Portal</label>
+          <select id="modalPortal" class="form-input">
+            <option value="LinkedIn">LinkedIn</option>
+            <option value="Hirist">Hirist</option>
+            <option value="Naukri">Naukri</option>
+            <option value="Career Site">Career Site</option>
+            <option value="Manual">Direct / Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="modalLocation">Location</label>
+          <input type="text" id="modalLocation" class="form-input" placeholder="e.g. Bengaluru, Remote, New York">
+        </div>
+        <div class="form-group">
+          <label for="modalLink">Job Posting URL</label>
+          <input type="url" id="modalLink" class="form-input" placeholder="https://...">
+        </div>
+        <div class="form-group">
+          <label for="modalNotes">Notes</label>
+          <input type="text" id="modalNotes" class="form-input" placeholder="e.g. Referred by recruiter, 2 rounds">
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="cancelModalBtn" class="btn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Application</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Notification Toast -->
+  <div id="toast" class="toast">
+    <span id="toastIcon">✓</span>
+    <span id="toastMsg">Updated</span>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
