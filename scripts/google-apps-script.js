@@ -66,3 +66,43 @@ function doPost(e) {
   }
 }
 
+function doGet(e) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName('Applications');
+    if (!sheet) {
+      return ContentService.createTextOutput(JSON.stringify({ applications: [] }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) {
+      return ContentService.createTextOutput(JSON.stringify({ applications: [] }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    const data = sheet.getRange(2, 1, lastRow - 1, 14).getValues();
+    const extractUrl = val => {
+      if (!val) return '';
+      const m = String(val).match(/=HYPERLINK\("([^"]+)"/i);
+      return m ? m[1] : (String(val).startsWith('http') ? String(val) : '');
+    };
+    const applications = data.map((r, idx) => ({
+      rowIndex: idx + 2,
+      company: r[0] || '',
+      title: r[1] || '',
+      appliedDate: r[2] instanceof Date ? Utilities.formatDate(r[2], Session.getScriptTimeZone(), 'yyyy-MM-dd') : (r[2] || ''),
+      jobLink: extractUrl(r[3]),
+      status: r[4] || 'Applied',
+      sourcePortal: r[5] || 'Direct',
+      location: r[6] || '',
+      notes: r[12] || '',
+      uniqueKey: r[13] || ''
+    })).filter(a => a.company && a.company !== 'Company');
+
+    return ContentService.createTextOutput(JSON.stringify({ applications: applications }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ error: err.toString(), applications: [] }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+

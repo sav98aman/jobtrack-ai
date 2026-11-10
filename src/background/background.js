@@ -279,6 +279,18 @@ async function handle(m, sender) {
         await loc.set({ settings: st });
       }
       if (!st.spreadsheetId) {
+        if (st.webhookUrl) {
+          try {
+            const resp = await fetch(st.webhookUrl);
+            if (resp.ok) {
+              const data = await resp.json().catch(() => ({}));
+              if (data.applications && Array.isArray(data.applications)) {
+                await loc.set({ cachedApplications: data.applications });
+                return { ok: true, source: 'webhook', applications: data.applications, spreadsheetId: '' };
+              }
+            }
+          } catch {}
+        }
         return { ok: true, source: 'cache', applications: cached, spreadsheetId: '' };
       }
       const interactive = !!m.interactive;
