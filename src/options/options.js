@@ -48,6 +48,18 @@ document.getElementById('save').onclick = () => {
         }
       }
     }
+    // Auto-detect: if a Web App URL was pasted into spreadsheetId
+    if (i === 'spreadsheetId' && val && val.includes('script.google.com/macros/s/')) {
+      st.webhookUrl = val;
+      document.getElementById('webhookUrl').value = val;
+      val = '';
+      document.getElementById('spreadsheetId').value = '';
+    }
+    // Sanitize spreadsheetId
+    if (i === 'spreadsheetId' && val && (val === 'exec' || val.length < 15)) {
+      val = '';
+      document.getElementById('spreadsheetId').value = '';
+    }
     st[i] = val;
   });
   flags.forEach(i => st[i] = document.getElementById(i).checked);

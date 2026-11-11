@@ -2,9 +2,10 @@
 (() => {
   if (window.__jobtrack) return; window.__jobtrack = true;
   const A = JT.adapters;
-  const CONFIRM_RE = /(application (has been |was |is )?(submitted|received|sent|complete|delivered)|(thank you|thanks) for (applying|your application|submitting|your interest)|successfully applied|you('ve| have) (successfully )?applied|application (submitted )?successfully|we('ve| have) received your application|application complete|your application has been sent)/i;
+  const CONFIRM_RE = /(application (has been |was |is )?(submitted|received|sent|complete|delivered)|(thank you|thanks) for (applying|your application|submitting|your interest)|successfully applied|you('ve| have) (successfully )?applied|application (submitted )?successfully|we('ve| have) received your application|application complete|your application has been sent|applied to ["'].+?["']|applied to [A-Za-z0-9]|interview preparation for)/i;
   const NEG_RE = /(failed|error|unable|try again|something went wrong|invalid|already applied|not submitted)/i;
-  let sawForm = false, jobSent = '', timer = null, lastHref = location.href;
+  let sawForm = false, jobSent = '', lastJobSentTitle = '', timer = null, lastHref = location.href;
+  let lastActiveJob = null;
   const sent = new Set();
 
   const isAlive = () => { try { return !!chrome.runtime?.id; } catch { return false; } };
@@ -85,8 +86,8 @@
     const platformSpecific = !!(p.confirmSel || []).some(s => document.querySelector(s));
     const urlConfirm = !!(
       (p.confirmUrl && p.confirmUrl.test(location.href)) ||
-      /(?:\/|^)(?:job|career|apply|application)[^/]*(?:confirm|thank|submitted|success|applied)/i.test(location.pathname) ||
-      /(?:thank-you-for-applying|application-submitted|post-apply|apply\/confirmation)/i.test(location.pathname)
+      /(?:\/|^)(?:job|career|apply|application|myapply)[^/]*(?:confirm|thank|submitted|success|applied|saveapply)/i.test(location.pathname) ||
+      /(?:thank-you-for-applying|application-submitted|post-apply|apply\/confirmation|saveapply|myapply)/i.test(location.pathname)
     );
     const result = { phrase: !!phrase, phraseText: phrase, platformSpecific, urlConfirm, formGone: sawForm && !formVisible(), negative };
     if (result.phrase || result.platformSpecific || result.urlConfirm) {
@@ -99,8 +100,14 @@
     if (!(await enabled())) return;
     if (formVisible()) sawForm = true;
     const job = A.extractJob();
-    if (looksLikeJobPage(job) && jobSent !== location.href) {
+    if (lastActiveJob && Date.now() - lastActiveJob.timestamp < 30 * 60e3) {
+      if (!job.title && lastActiveJob.title) job.title = lastActiveJob.title;
+      if (!job.company && lastActiveJob.company) job.company = lastActiveJob.company;
+      if (!job.location && lastActiveJob.location) job.location = lastActiveJob.location;
+    }
+    if (looksLikeJobPage(job) && (jobSent !== location.href || (job.title && !lastJobSentTitle))) {
       jobSent = location.href;
+      lastJobSentTitle = job.title || '';
       console.log('[JobTrack AI] Job page detected:', job.company, '—', job.title);
       send('JOB_SEEN', { job });
     }
@@ -130,10 +137,10 @@
       
       const currentJob = A.extractJob();
       const job = {
-        company: currentJob.company || submittedJob.company || '',
-        title: currentJob.title || submittedJob.title || '',
-        location: currentJob.location || submittedJob.location || '',
-        canonical: currentJob.canonical || submittedJob.canonical || location.href
+        company: currentJob.company || submittedJob.company || (lastActiveJob && lastActiveJob.company) || '',
+        title: currentJob.title || submittedJob.title || (lastActiveJob && lastActiveJob.title) || '',
+        location: currentJob.location || submittedJob.location || (lastActiveJob && lastActiveJob.location) || '',
+        canonical: currentJob.canonical || submittedJob.canonical || (lastActiveJob && lastActiveJob.canonical) || location.href
       };
 
       const s = collectSignals();
@@ -157,12 +164,20 @@
     const el = e.target.closest && e.target.closest('button,a,input[type=submit],[role=button]');
     if (!el) return;
     const label = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
-    if (/^(easy apply|apply( now| for this job| to this job| on company (site|website))?)$/i.test(label)) {
+    if (/^(easy apply|apply( now| for this job| to this job| on company (site|website))?)$/i.test(label) || /^(easy\s+)?apply\s+to/i.test(label)) {
       console.log('[JobTrack AI] Apply button clicked:', label);
-      send('APPLY_START', { job: A.extractJob() });
+      const applyJob = A.extractJob(el);
+      if (applyJob.company || applyJob.title) {
+        lastActiveJob = { ...applyJob, timestamp: Date.now() };
+      }
+      send('APPLY_START', { job: applyJob });
     } else if (/(submit( application)?|send application|apply now|finish|complete)/i.test(label)) {
       console.log('[JobTrack AI] Submit button clicked:', label);
-      const submitJob = A.extractJob();
+      let submitJob = A.extractJob(el);
+      if (lastActiveJob && Date.now() - lastActiveJob.timestamp < 30 * 60e3) {
+        if (!submitJob.title && lastActiveJob.title) submitJob.title = lastActiveJob.title;
+        if (!submitJob.company && lastActiveJob.company) submitJob.company = lastActiveJob.company;
+      }
       send('SUBMIT_CLICK', { job: submitJob });
       checkPostSubmit(submitJob);
     }

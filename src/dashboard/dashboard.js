@@ -60,35 +60,36 @@
     $('connStatus').textContent = 'Fetching applications…';
     try {
       const res = await chrome.runtime.sendMessage({ type: 'GET_APPLICATIONS', interactive: !!interactive });
-      if (res && res.applications && res.applications.length > 0) {
-        rawApplications = res.applications;
-        spreadsheetId = res.spreadsheetId || '';
+      rawApplications = (res && res.applications) || [];
+      if (window.JT && JT.engine && typeof JT.engine.normalizeRecord === 'function') {
+        rawApplications = rawApplications.map(app => {
+          const norm = JT.engine.normalizeRecord(app.company, app.title, app.location, app.jobLink);
+          return {
+            ...app,
+            company: norm.company || app.company,
+            title: norm.title || app.title,
+            location: norm.location || app.location
+          };
+        });
+      }
+      spreadsheetId = (res && res.spreadsheetId) || '';
 
+      if (res && res.ok && (res.source === 'webhook' || res.source === 'sheets')) {
         $('connectBanner').style.display = 'none';
         $('connStatus').innerHTML = `Synced with Google Sheets (${rawApplications.length} total) <span style="color:#10B981">● Connected</span>`;
         if (spreadsheetId) {
           $('openSheetLink').href = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
           $('openSheetLink').style.display = 'inline-flex';
         }
-      } else if (res && res.ok) {
-        rawApplications = res.applications || [];
-        spreadsheetId = res.spreadsheetId || '';
-
+      } else {
+        // Fallback to local cache
+        const errDetail = (res && res.error) ? res.error : 'Live sync not active';
+        $('connStatus').innerHTML = `<span style="color:#FBBF24;">⚠️ Local Cache (${rawApplications.length} items)</span> · ${esc(errDetail)}`;
+        $('connectBanner').style.display = 'flex';
         if (spreadsheetId) {
-          $('connectBanner').style.display = 'none';
-          $('connStatus').innerHTML = `Synced with Google Sheets (${rawApplications.length} total) <span style="color:#10B981">● Connected</span>`;
           $('openSheetLink').href = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
           $('openSheetLink').style.display = 'inline-flex';
-        } else {
-          $('connectBanner').style.display = 'flex';
-          $('connStatus').innerHTML = `Local Mode (${rawApplications.length} saved) · Connect Google Sheet to sync live`;
-          $('openSheetLink').style.display = 'none';
         }
-      } else {
-        if (rawApplications.length === 0) {
-          $('connectBanner').style.display = 'flex';
-        }
-        $('connStatus').textContent = res && res.error ? `Sync notice: ${res.error}` : 'Offline (Showing cached applications)';
       }
     } catch (e) {
       $('connStatus').textContent = 'Unable to reach extension background worker.';
@@ -317,9 +318,20 @@
 
   $('saveSheetBtn').addEventListener('click', async () => {
     const raw = $('sheetInput').value.trim();
+    if (!raw) return;
+
+    if (raw.includes('script.google.com/macros/s/')) {
+      showToast('Connecting Web App URL…', '⏳');
+      await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings: { webhookUrl: raw } });
+      showToast('Web App connected! Fetching data…', '✓');
+      $('sheetInput').value = '';
+      setTimeout(() => loadData(true), 400);
+      return;
+    }
+
     const id = parseSheetId(raw);
     if (!id) {
-      showToast('Please enter a valid Google Sheet URL or ID', '⚠️');
+      showToast('Please enter a valid Google Sheet or Web App URL', '⚠️');
       return;
     }
     showToast('Connecting spreadsheet…');

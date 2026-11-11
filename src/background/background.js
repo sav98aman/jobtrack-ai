@@ -126,8 +126,18 @@ async function handleEvidence(m, tabId) {
     return;
   }
   const record = JT.engine.buildRecord(ctx, cur);
+
+  // If title is missing, try URL parse fallback one more time
+  if (!record.title) {
+    const fromUrl = JT.engine.parseTitleFromUrl(record.jobLink || m.url);
+    if (fromUrl && JT.engine.isValidJobTitle(fromUrl)) {
+      record.title = fromUrl;
+      record.uniqueKey = U.uniqueKey(record.company, record.title, record.appliedDate);
+    }
+  }
+
   const criticalIssues = record.issues.filter(i => i.includes('Employer not found') || i.includes('Job title not found'));
-  if (level === 'high' && (criticalIssues.length || st.alwaysConfirm || !st.autoSave)) level = 'medium';
+  if (level === 'high' && (criticalIssues.length || st.alwaysConfirm || !st.autoSave || !record.title)) level = 'medium';
   console.log(`[JobTrack Background] Resulting Level: ${level}, Record:`, record);
   const seen = await get('seen', {});
   if (record.company && record.title && seen[record.uniqueKey] && Date.now() - seen[record.uniqueKey] < 24 * 3600e3) {
@@ -138,7 +148,7 @@ async function handleEvidence(m, tabId) {
     seen[record.uniqueKey] = Date.now();
     await loc.set({ seen });
   }
-  if (level === 'high' || (level === 'medium' && st.autoSave && !st.alwaysConfirm && record.company)) {
+  if (level === 'high' || (level === 'medium' && st.autoSave && !st.alwaysConfirm && record.company && record.title)) {
     console.log('[JobTrack Background] Auto-saving record directly:', record);
     return enqueue(record);
   }
@@ -156,7 +166,7 @@ async function handle(m, sender) {
       const here = { platformId: m.platformId, url: m.url, host, job: m.job };
       if (!c || !c.applyStartedAt) c = { origin: here };
       else if (host !== c.origin.host) c.external = here;
-      else if (m.job.title && !c.origin.job.title) c.origin = here;
+      else if (m.job && m.job.title && (!c.origin.job || !c.origin.job.title)) c.origin = here;
       return setCtx(id, c);
     }
     case 'APPLY_START': {
@@ -164,10 +174,11 @@ async function handle(m, sender) {
       if (!c) c = { origin: { platformId: m.platformId, url: m.url, host: U.hostOf(m.url), job: m.job } };
       c.applyStartedAt = Date.now();
       if (m.job && (m.job.company || m.job.title)) {
+        c.applyJob = m.job;
         if (!c.origin) c.origin = { platformId: m.platformId, url: m.url, host: U.hostOf(m.url), job: m.job };
-        else {
-          if (m.job.company) c.origin.job.company = m.job.company;
-          if (m.job.title) c.origin.job.title = m.job.title;
+        else if (c.origin.job) {
+          if (m.job.company && !c.origin.job.company) c.origin.job.company = m.job.company;
+          if (m.job.title && !c.origin.job.title) c.origin.job.title = m.job.title;
         }
       }
       return setCtx(id, c);
@@ -179,9 +190,9 @@ async function handle(m, sender) {
       if (m.job && (m.job.company || m.job.title)) {
         c.submitJob = m.job;
         if (!c.origin) c.origin = { platformId: m.platformId, url: m.url, host: U.hostOf(m.url), job: m.job };
-        else {
-          if (m.job.company) c.origin.job.company = m.job.company;
-          if (m.job.title) c.origin.job.title = m.job.title;
+        else if (c.origin.job) {
+          if (m.job.company && !c.origin.job.company) c.origin.job.company = m.job.company;
+          if (m.job.title && !c.origin.job.title) c.origin.job.title = m.job.title;
         }
       }
       return setCtx(id, c);
@@ -267,19 +278,40 @@ async function handle(m, sender) {
     }
     case 'SAVE_SHEET_ID': {
       const st = await settings();
-      st.spreadsheetId = m.spreadsheetId || '';
+      let sId = (m.spreadsheetId || '').trim();
+      const mMatch = sId.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+      if (mMatch) sId = mMatch[1];
+      if (sId === 'exec' || sId.length < 15) sId = '';
+      st.spreadsheetId = sId;
       await loc.set({ settings: st });
       return { ok: true, spreadsheetId: st.spreadsheetId };
     }
     case 'GET_APPLICATIONS': {
       const cached = (await loc.get('cachedApplications')).cachedApplications || [];
       const st = await settings();
+
+      // Sanitize spreadsheetId (fix cases where 'exec' or invalid text was saved)
+      if (st.spreadsheetId) {
+        const mMatch = st.spreadsheetId.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+        if (mMatch) st.spreadsheetId = mMatch[1];
+        if (st.spreadsheetId === 'exec' || st.spreadsheetId.length < 15) {
+          st.spreadsheetId = '';
+          await loc.set({ settings: st });
+        }
+      }
+
       if (m.spreadsheetId && m.spreadsheetId !== st.spreadsheetId) {
-        st.spreadsheetId = m.spreadsheetId;
-        await loc.set({ settings: st });
+        let sId = m.spreadsheetId.trim();
+        const mMatch = sId.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+        if (mMatch) sId = mMatch[1];
+        if (sId !== 'exec' && sId.length >= 15) {
+          st.spreadsheetId = sId;
+          await loc.set({ settings: st });
+        }
       }
 
       // 1. If webhook is configured, fetch applications directly through the webhook (no OAuth needed!)
+      let webhookErr = '';
       if (st.webhookUrl) {
         try {
           let data = null;
@@ -292,23 +324,40 @@ async function handle(m, sender) {
             });
             if (resp.ok) {
               data = await resp.json().catch(() => null);
+            } else {
+              webhookErr = `Webhook HTTP ${resp.status}`;
             }
           } catch (postErr) {
-            console.warn('[JobTrack Background] Webhook POST getApplications error:', postErr);
+            webhookErr = postErr.message;
           }
 
           // Fallback to GET request if POST did not return applications array
           if (!data || !data.applications || !Array.isArray(data.applications) || data.applications.length === 0) {
             try {
               const getResp = await fetch(st.webhookUrl);
-              if (getResp.ok) {
-                const getData = await getResp.json().catch(() => null);
-                if (getData && getData.applications && Array.isArray(getData.applications) && getData.applications.length > 0) {
-                  data = getData;
+              const text = await getResp.text().catch(() => '');
+              if (text.includes('Script function not found: doGet')) {
+                webhookErr = 'Apps Script Web App error: doGet not found (needs New version deployed)';
+              } else if (text.includes('Authorization required') || text.includes('not verified')) {
+                webhookErr = 'Apps Script needs authorization. Run doGet in editor to allow.';
+              } else {
+                try {
+                  const getData = JSON.parse(text);
+                  if (getData && getData.applications && Array.isArray(getData.applications) && getData.applications.length > 0) {
+                    data = getData;
+                  }
+                } catch (jsonErr) {
+                  const cleanText = text
+                    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                    .replace(/<[^>]*>/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                  webhookErr = cleanText.slice(0, 100) || 'Invalid response from Webhook';
                 }
               }
             } catch (getErr) {
-              console.warn('[JobTrack Background] Webhook GET getApplications error:', getErr);
+              webhookErr = getErr.message;
             }
           }
 
@@ -317,7 +366,7 @@ async function handle(m, sender) {
             return { ok: true, source: 'webhook', applications: data.applications, spreadsheetId: st.spreadsheetId };
           }
         } catch (err) {
-          console.warn('[JobTrack Background] Webhook getApplications fetch error:', err);
+          webhookErr = err.message;
         }
       }
 
@@ -357,12 +406,11 @@ async function handle(m, sender) {
           await loc.set({ cachedApplications: applications });
           return { ok: true, source: 'sheets', spreadsheetId: st.spreadsheetId, applications };
         } catch (e) {
-          // If sheets API threw (e.g. 401), return cached applications with ok: true if cache has data
-          return { ok: cached.length > 0, source: 'cache', applications: cached, spreadsheetId: st.spreadsheetId, error: e.message };
+          return { ok: false, source: 'cache', applications: cached, spreadsheetId: st.spreadsheetId, error: webhookErr || e.message };
         }
       }
 
-      return { ok: true, source: 'cache', applications: cached, spreadsheetId: '' };
+      return { ok: false, source: 'cache', applications: cached, spreadsheetId: '', error: webhookErr || 'No Google Sheet or Webhook connected' };
     }
     case 'UPDATE_STATUS': {
       const { rowIndex, status, uniqueKey, stage, notes, company } = m;

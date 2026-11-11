@@ -460,13 +460,14 @@ JT.sheets = {
     ];
   },
   async sync(rec, st, interactive = false) {
-    if (st.webhookUrl) {
-      if (st.webhookUrl.includes('/home/projects/') || st.webhookUrl.includes('docs.google.com/spreadsheets')) {
-        const m = st.webhookUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+    const webhookUrl = (st.webhookUrl || '').trim();
+    if (webhookUrl) {
+      if (webhookUrl.includes('/home/projects/') || webhookUrl.includes('docs.google.com/spreadsheets')) {
+        const m = webhookUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
         if (m) st.spreadsheetId = m[1];
         st.webhookUrl = '';
       } else {
-        const resp = await fetch(st.webhookUrl, {
+        const resp = await fetch(webhookUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ action: 'append', sheetName: st.sheetName || 'Applications', values: [this.toRow(rec)], record: rec })
