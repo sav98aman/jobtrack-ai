@@ -1,18 +1,50 @@
 /**
  * JobTrack AI - Google Apps Script Backend (100% Free, Zero Google Cloud Setup)
  *
- * HOW TO USE:
- * 1. Open Google Sheets (https://sheets.new)
+ * HOW TO USE / UPDATE:
+ * 1. Open your Google Sheet
  * 2. Click "Extensions" -> "Apps Script"
  * 3. Delete any code in the editor and paste this entire file.
- * 4. Click "Deploy" -> "New deployment"
- * 5. Select type: "Web app"
- * 6. Set Description: "JobTrack AI Webhook"
- * 7. Set Execute as: "Me"
- * 8. Set Who has access: "Anyone" (allows your extension to send data to your sheet)
- * 9. Click "Deploy", authorize permissions, and copy the Web App URL (ends with /exec)
- * 10. Open JobTrack AI extension -> Settings -> Paste URL under "Method B: Google Apps Script Web App".
+ * 4. Click "Deploy" -> "Manage deployments" -> Click Edit (pencil icon) -> Version: "New version" -> Click "Deploy"
+ * 5. Web App URL is ready! Both saving and loading applications work automatically with 0 permissions errors.
  */
+
+function readApplicationsFromSheet(sheet) {
+  if (!sheet) return [];
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return [];
+  const data = sheet.getRange(2, 1, lastRow - 1, 14).getValues();
+  const extractUrl = function(val) {
+    if (!val) return '';
+    const m = String(val).match(/=HYPERLINK\("([^"]+)"/i);
+    return m ? m[1] : (String(val).startsWith('http') ? String(val) : '');
+  };
+  return data.map(function(r, idx) {
+    var appliedStr = '';
+    if (r[2] instanceof Date) {
+      appliedStr = Utilities.formatDate(r[2], Session.getScriptTimeZone() || 'GMT', 'yyyy-MM-dd');
+    } else {
+      appliedStr = String(r[2] || '');
+    }
+    return {
+      rowIndex: idx + 2,
+      company: r[0] || '',
+      title: r[1] || '',
+      appliedDate: appliedStr,
+      jobLink: extractUrl(r[3]),
+      status: r[4] || 'Applied',
+      sourcePortal: r[5] || 'Direct',
+      location: r[6] || '',
+      employmentType: r[7] || '',
+      experience: r[8] || '',
+      salary: r[9] || '',
+      stage: r[10] || '',
+      loggedAt: r[11] || '',
+      notes: r[12] || '',
+      uniqueKey: r[13] || ''
+    };
+  }).filter(function(a) { return a.company && a.company !== 'Company'; });
+}
 
 function doPost(e) {
   try {
@@ -37,6 +69,42 @@ function doPost(e) {
       sheet.setFrozenRows(1);
     }
 
+    // 1. Fetch Applications Action
+    if (data.action === 'getApplications') {
+      const apps = readApplicationsFromSheet(sheet);
+      return ContentService.createTextOutput(JSON.stringify({ ok: true, applications: apps }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 2. Update Status Action (from HTML Dashboard)
+    if (data.action === 'updateStatus') {
+      const lastRow = sheet.getLastRow();
+      let targetRow = data.rowIndex;
+
+      if (lastRow > 1) {
+        if (data.uniqueKey) {
+          const keys = sheet.getRange(2, 14, lastRow - 1, 1).getValues();
+          for (let i = 0; i < keys.length; i++) {
+            if (keys[i][0] === data.uniqueKey) {
+              targetRow = i + 2;
+              break;
+            }
+          }
+        }
+        if (targetRow && targetRow >= 2 && targetRow <= lastRow) {
+          if (data.status) sheet.getRange(targetRow, 5).setValue(data.status); // Column E: Status
+          if (data.stage !== undefined) sheet.getRange(targetRow, 11).setValue(data.stage); // Column K: Stage
+          if (data.notes !== undefined) sheet.getRange(targetRow, 13).setValue(data.notes); // Column M: Notes
+
+          return ContentService.createTextOutput(JSON.stringify({ ok: true, status: 'updated', rowIndex: targetRow }))
+            .setMimeType(ContentService.MimeType.JSON);
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({ ok: false, error: 'Row not found' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 3. Append Application Action
     if (data.action === 'append' && data.values && data.values.length > 0) {
       const row = data.values[0];
       const uniqueKey = row[13];
@@ -70,39 +138,11 @@ function doGet(e) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName('Applications');
-    if (!sheet) {
-      return ContentService.createTextOutput(JSON.stringify({ applications: [] }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-      return ContentService.createTextOutput(JSON.stringify({ applications: [] }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-    const data = sheet.getRange(2, 1, lastRow - 1, 14).getValues();
-    const extractUrl = val => {
-      if (!val) return '';
-      const m = String(val).match(/=HYPERLINK\("([^"]+)"/i);
-      return m ? m[1] : (String(val).startsWith('http') ? String(val) : '');
-    };
-    const applications = data.map((r, idx) => ({
-      rowIndex: idx + 2,
-      company: r[0] || '',
-      title: r[1] || '',
-      appliedDate: r[2] instanceof Date ? Utilities.formatDate(r[2], Session.getScriptTimeZone(), 'yyyy-MM-dd') : (r[2] || ''),
-      jobLink: extractUrl(r[3]),
-      status: r[4] || 'Applied',
-      sourcePortal: r[5] || 'Direct',
-      location: r[6] || '',
-      notes: r[12] || '',
-      uniqueKey: r[13] || ''
-    })).filter(a => a.company && a.company !== 'Company');
-
-    return ContentService.createTextOutput(JSON.stringify({ applications: applications }))
+    const apps = readApplicationsFromSheet(sheet);
+    return ContentService.createTextOutput(JSON.stringify({ ok: true, applications: apps }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ error: err.toString(), applications: [] }))
       .setMimeType(ContentService.MimeType.JSON);
   }
 }
-

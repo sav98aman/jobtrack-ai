@@ -278,70 +278,104 @@ async function handle(m, sender) {
         st.spreadsheetId = m.spreadsheetId;
         await loc.set({ settings: st });
       }
-      if (!st.spreadsheetId) {
-        if (st.webhookUrl) {
-          try {
-            const resp = await fetch(st.webhookUrl);
-            if (resp.ok) {
-              const data = await resp.json().catch(() => ({}));
-              if (data.applications && Array.isArray(data.applications)) {
-                await loc.set({ cachedApplications: data.applications });
-                return { ok: true, source: 'webhook', applications: data.applications, spreadsheetId: '' };
-              }
-            }
-          } catch {}
-        }
-        return { ok: true, source: 'cache', applications: cached, spreadsheetId: '' };
-      }
-      const interactive = !!m.interactive;
-      try {
-        const sheetInfo = await JT.sheets.resolveSheetInfo(st.spreadsheetId, st.sheetName, interactive);
-        const sheetName = sheetInfo.name;
-        const base = `https://sheets.googleapis.com/v4/spreadsheets/${st.spreadsheetId}/values/`;
-        const rng = encodeURIComponent(`${sheetName}!A2:N`);
-        const data = await JT.sheets.api(`${base}${rng}?valueRenderOption=FORMULA`, {}, interactive);
-        const rows = data.values || [];
-        const extractUrl = val => {
-          if (!val) return '';
-          const match = String(val).match(/=HYPERLINK\("([^"]+)"/i);
-          return match ? match[1] : (String(val).startsWith('http') ? String(val) : '');
-        };
-        const applications = rows.map((r, idx) => ({
-          rowIndex: idx + 2,
-          company: r[0] || '',
-          title: r[1] || '',
-          appliedDate: r[2] || '',
-          jobLink: extractUrl(r[3]),
-          status: r[4] || 'Applied',
-          sourcePortal: r[5] || 'Direct',
-          location: r[6] || '',
-          employmentType: r[7] || '',
-          experience: r[8] || '',
-          salary: r[9] || '',
-          stage: r[10] || '',
-          loggedAt: r[11] || '',
-          notes: r[12] || '',
-          uniqueKey: r[13] || ''
-        })).filter(a => a.company && a.company !== 'Company');
 
-        await loc.set({ cachedApplications: applications });
-        return { ok: true, source: 'sheets', spreadsheetId: st.spreadsheetId, applications };
-      } catch (e) {
-        return { ok: false, source: 'cache', applications: cached, spreadsheetId: st.spreadsheetId, error: e.message };
+      // 1. If webhook is configured, fetch applications directly through the webhook (no OAuth needed!)
+      if (st.webhookUrl) {
+        try {
+          // Try POST with action: 'getApplications'
+          let resp = await fetch(st.webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'getApplications' })
+          });
+          if (!resp.ok) {
+            resp = await fetch(st.webhookUrl);
+          }
+          if (resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            if (data && data.applications && Array.isArray(data.applications) && data.applications.length > 0) {
+              await loc.set({ cachedApplications: data.applications });
+              return { ok: true, source: 'webhook', applications: data.applications, spreadsheetId: st.spreadsheetId };
+            }
+          }
+        } catch (err) {
+          console.warn('[JobTrack Background] Webhook getApplications fetch error:', err);
+        }
       }
+
+      // 2. Try Google Sheets REST API if spreadsheetId is configured
+      if (st.spreadsheetId) {
+        const interactive = !!m.interactive;
+        try {
+          const sheetInfo = await JT.sheets.resolveSheetInfo(st.spreadsheetId, st.sheetName, interactive);
+          const sheetName = sheetInfo.name;
+          const base = `https://sheets.googleapis.com/v4/spreadsheets/${st.spreadsheetId}/values/`;
+          const rng = encodeURIComponent(`${sheetName}!A2:N`);
+          const data = await JT.sheets.api(`${base}${rng}?valueRenderOption=FORMULA`, {}, interactive);
+          const rows = data.values || [];
+          const extractUrl = val => {
+            if (!val) return '';
+            const match = String(val).match(/=HYPERLINK\("([^"]+)"/i);
+            return match ? match[1] : (String(val).startsWith('http') ? String(val) : '');
+          };
+          const applications = rows.map((r, idx) => ({
+            rowIndex: idx + 2,
+            company: r[0] || '',
+            title: r[1] || '',
+            appliedDate: r[2] || '',
+            jobLink: extractUrl(r[3]),
+            status: r[4] || 'Applied',
+            sourcePortal: r[5] || 'Direct',
+            location: r[6] || '',
+            employmentType: r[7] || '',
+            experience: r[8] || '',
+            salary: r[9] || '',
+            stage: r[10] || '',
+            loggedAt: r[11] || '',
+            notes: r[12] || '',
+            uniqueKey: r[13] || ''
+          })).filter(a => a.company && a.company !== 'Company');
+
+          await loc.set({ cachedApplications: applications });
+          return { ok: true, source: 'sheets', spreadsheetId: st.spreadsheetId, applications };
+        } catch (e) {
+          // If sheets API threw (e.g. 401), return cached applications with ok: true if cache has data
+          return { ok: cached.length > 0, source: 'cache', applications: cached, spreadsheetId: st.spreadsheetId, error: e.message };
+        }
+      }
+
+      return { ok: true, source: 'cache', applications: cached, spreadsheetId: '' };
     }
     case 'UPDATE_STATUS': {
-      const { rowIndex, status, uniqueKey } = m;
+      const { rowIndex, status, uniqueKey, stage, notes } = m;
       const st = await settings();
       let cached = (await loc.get('cachedApplications')).cachedApplications || [];
       cached = cached.map(c => {
         if ((rowIndex && c.rowIndex === rowIndex) || (uniqueKey && c.uniqueKey === uniqueKey)) {
-          return { ...c, status };
+          return { ...c, status, ...(stage ? { stage } : {}), ...(notes ? { notes } : {}) };
         }
         return c;
       });
       await loc.set({ cachedApplications: cached });
 
+      // 1. If webhook is configured, update sheet via Webhook!
+      if (st.webhookUrl) {
+        try {
+          const resp = await fetch(st.webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'updateStatus', rowIndex, uniqueKey, status, stage, notes })
+          });
+          if (resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            if (data.ok) return { ok: true, source: 'webhook', rowIndex: data.rowIndex };
+          }
+        } catch (err) {
+          console.warn('[JobTrack Background] Webhook updateStatus failed:', err);
+        }
+      }
+
+      // 2. If OAuth Google Sheets API is configured
       if (st.spreadsheetId && rowIndex) {
         try {
           const sheetInfo = await JT.sheets.resolveSheetInfo(st.spreadsheetId, st.sheetName, false);
@@ -352,12 +386,12 @@ async function handle(m, sender) {
             method: 'PUT',
             body: JSON.stringify({ range: `${sheetName}!E${rowIndex}`, values: [[status]] })
           }, false);
-          return { ok: true };
+          return { ok: true, source: 'sheets' };
         } catch (e) {
           return { ok: false, error: e.message };
         }
       }
-      return { ok: true };
+      return { ok: true, source: 'local' };
     }
   }
 }

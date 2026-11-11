@@ -60,7 +60,17 @@
     $('connStatus').textContent = 'Fetching applications…';
     try {
       const res = await chrome.runtime.sendMessage({ type: 'GET_APPLICATIONS', interactive: !!interactive });
-      if (res && res.ok) {
+      if (res && res.applications && res.applications.length > 0) {
+        rawApplications = res.applications;
+        spreadsheetId = res.spreadsheetId || '';
+
+        $('connectBanner').style.display = 'none';
+        $('connStatus').innerHTML = `Synced with Google Sheets (${rawApplications.length} total) <span style="color:#10B981">● Connected</span>`;
+        if (spreadsheetId) {
+          $('openSheetLink').href = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+          $('openSheetLink').style.display = 'inline-flex';
+        }
+      } else if (res && res.ok) {
         rawApplications = res.applications || [];
         spreadsheetId = res.spreadsheetId || '';
 
@@ -71,11 +81,13 @@
           $('openSheetLink').style.display = 'inline-flex';
         } else {
           $('connectBanner').style.display = 'flex';
-          $('connStatus').innerHTML = `Local Mode (${rawApplications.length} saved) · Connect Google in Extension Settings to sync live`;
+          $('connStatus').innerHTML = `Local Mode (${rawApplications.length} saved) · Connect Google Sheet to sync live`;
           $('openSheetLink').style.display = 'none';
         }
       } else {
-        $('connectBanner').style.display = 'flex';
+        if (rawApplications.length === 0) {
+          $('connectBanner').style.display = 'flex';
+        }
         $('connStatus').textContent = res && res.error ? `Sync notice: ${res.error}` : 'Offline (Showing cached applications)';
       }
     } catch (e) {
@@ -104,6 +116,7 @@
     $('cntInterviewing').textContent = `(${rawApplications.filter(a => a.status === 'Interviewing').length})`;
     $('cntOffer').textContent = `(${rawApplications.filter(a => a.status === 'Offer').length})`;
     $('cntRejected').textContent = `(${rawApplications.filter(a => a.status === 'Rejected').length})`;
+    if ($('cntNoResponse')) $('cntNoResponse').textContent = `(${rawApplications.filter(a => a.status === 'No Response').length})`;
   }
 
   function render() {
@@ -196,6 +209,7 @@
               <option value="Interviewing" ${status === 'Interviewing' ? 'selected' : ''}>Interviewing</option>
               <option value="Offer" ${status === 'Offer' ? 'selected' : ''}>Offer</option>
               <option value="Rejected" ${status === 'Rejected' ? 'selected' : ''}>Rejected</option>
+              <option value="No Response" ${status === 'No Response' ? 'selected' : ''}>No Response</option>
             </select>
           </td>
           <td style="text-align:right;">
@@ -219,8 +233,9 @@
       if (item) item.status = newStatus;
 
       // Update select styling
-      select.className = `status-select status-${newStatus}`;
+      select.className = `status-select status-${newStatus.replace(/\s+/g, '-')}`;
       updateKPIs();
+      showToast(`Updating status in Google Sheet…`, '⏳');
 
       try {
         const res = await chrome.runtime.sendMessage({
@@ -230,9 +245,9 @@
           status: newStatus
         });
         if (res && res.ok) {
-          showToast(`Updated ${item ? item.company : 'application'} to ${newStatus}`);
+          showToast(`✓ Google Sheet updated: ${item ? item.company : 'Job'} → ${newStatus}`);
         } else {
-          showToast(`Saved locally (Sync pending)`, 'ℹ');
+          showToast(`Saved locally (${res && res.error ? res.error : 'Sync pending'})`, 'ℹ');
         }
       } catch (err) {
         showToast(`Saved locally`, 'ℹ');
