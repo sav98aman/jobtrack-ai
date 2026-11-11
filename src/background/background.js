@@ -282,21 +282,39 @@ async function handle(m, sender) {
       // 1. If webhook is configured, fetch applications directly through the webhook (no OAuth needed!)
       if (st.webhookUrl) {
         try {
+          let data = null;
           // Try POST with action: 'getApplications'
-          let resp = await fetch(st.webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ action: 'getApplications' })
-          });
-          if (!resp.ok) {
-            resp = await fetch(st.webhookUrl);
-          }
-          if (resp.ok) {
-            const data = await resp.json().catch(() => ({}));
-            if (data && data.applications && Array.isArray(data.applications) && data.applications.length > 0) {
-              await loc.set({ cachedApplications: data.applications });
-              return { ok: true, source: 'webhook', applications: data.applications, spreadsheetId: st.spreadsheetId };
+          try {
+            const resp = await fetch(st.webhookUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify({ action: 'getApplications' })
+            });
+            if (resp.ok) {
+              data = await resp.json().catch(() => null);
             }
+          } catch (postErr) {
+            console.warn('[JobTrack Background] Webhook POST getApplications error:', postErr);
+          }
+
+          // Fallback to GET request if POST did not return applications array
+          if (!data || !data.applications || !Array.isArray(data.applications) || data.applications.length === 0) {
+            try {
+              const getResp = await fetch(st.webhookUrl);
+              if (getResp.ok) {
+                const getData = await getResp.json().catch(() => null);
+                if (getData && getData.applications && Array.isArray(getData.applications) && getData.applications.length > 0) {
+                  data = getData;
+                }
+              }
+            } catch (getErr) {
+              console.warn('[JobTrack Background] Webhook GET getApplications error:', getErr);
+            }
+          }
+
+          if (data && data.applications && Array.isArray(data.applications) && data.applications.length > 0) {
+            await loc.set({ cachedApplications: data.applications });
+            return { ok: true, source: 'webhook', applications: data.applications, spreadsheetId: st.spreadsheetId };
           }
         } catch (err) {
           console.warn('[JobTrack Background] Webhook getApplications fetch error:', err);
@@ -347,11 +365,11 @@ async function handle(m, sender) {
       return { ok: true, source: 'cache', applications: cached, spreadsheetId: '' };
     }
     case 'UPDATE_STATUS': {
-      const { rowIndex, status, uniqueKey, stage, notes } = m;
+      const { rowIndex, status, uniqueKey, stage, notes, company } = m;
       const st = await settings();
       let cached = (await loc.get('cachedApplications')).cachedApplications || [];
       cached = cached.map(c => {
-        if ((rowIndex && c.rowIndex === rowIndex) || (uniqueKey && c.uniqueKey === uniqueKey)) {
+        if ((rowIndex && c.rowIndex === rowIndex) || (uniqueKey && c.uniqueKey === uniqueKey) || (company && c.company === company)) {
           return { ...c, status, ...(stage ? { stage } : {}), ...(notes ? { notes } : {}) };
         }
         return c;
@@ -364,7 +382,7 @@ async function handle(m, sender) {
           const resp = await fetch(st.webhookUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ action: 'updateStatus', rowIndex, uniqueKey, status, stage, notes })
+            body: JSON.stringify({ action: 'updateStatus', rowIndex, uniqueKey, company, status, stage, notes })
           });
           if (resp.ok) {
             const data = await resp.json().catch(() => ({}));

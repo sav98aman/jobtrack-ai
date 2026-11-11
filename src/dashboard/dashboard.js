@@ -242,6 +242,7 @@
           type: 'UPDATE_STATUS',
           rowIndex,
           uniqueKey,
+          company: item ? item.company : '',
           status: newStatus
         });
         if (res && res.ok) {
