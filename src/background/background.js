@@ -412,6 +412,45 @@ async function handle(m, sender) {
 
       return { ok: false, source: 'cache', applications: cached, spreadsheetId: '', error: webhookErr || 'No Google Sheet or Webhook connected' };
     }
+    case 'SCAN_GMAIL': {
+      const st = await settings();
+      if (!st.webhookUrl) {
+        return { ok: false, error: 'Apps Script Web App URL required for Gmail scan. Check Settings.' };
+      }
+      try {
+        const resp = await fetch(st.webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'scanGmail' })
+        });
+        if (resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          return data;
+        }
+        return { ok: false, error: 'Web App request failed (' + resp.status + ')' };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    }
+    case 'UPDATE_STATUS_FROM_EMAIL': {
+      const { company, status, stage, notes } = m;
+      let cached = (await loc.get('cachedApplications')).cachedApplications || [];
+      const item = cached.find(c => String(c.company || '').trim().toLowerCase() === String(company || '').trim().toLowerCase());
+      const rowIndex = item ? item.rowIndex : null;
+      const uniqueKey = item ? item.uniqueKey : null;
+
+      notify(`Status Updated: ${company}`, `Marked as ${status} based on recruiter email.`);
+
+      return handle({
+        type: 'UPDATE_STATUS',
+        company,
+        status,
+        stage: stage || status,
+        notes: notes || `Email update on ${U.todayISO()}`,
+        rowIndex,
+        uniqueKey
+      }, sender);
+    }
     case 'UPDATE_STATUS': {
       const { rowIndex, status, uniqueKey, stage, notes, company } = m;
       const st = await settings();

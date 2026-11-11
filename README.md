@@ -5,6 +5,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Chrome%20Extension-Manifest%20V3-brightgreen.svg)](manifest.json)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Open Source Love](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://github.com/ellerbrock/open-source-badges/)
 [![Platform](https://img.shields.io/badge/Portals-LinkedIn%20%7C%20Hirist%20%7C%20Naukri%20%7C%20IIMJobs%20%7C%20Foundit%20%7C%20Career%20Sites-orange.svg)](SUPPORT_MATRIX.md)
 
 ---
@@ -18,6 +20,14 @@
   - **Naukri.com** (Single-apply `/myapply/saveApply`, standard job listings)
   - **Indeed**, **Instahyre**, **Foundit**
   - **Direct Company Career Sites** (Workday, Greenhouse, Lever, SmartRecruiters, Ashby)
+- **✉️ Recruiter Email Intelligence (Gmail & Outlook)**:
+  - Automatically identifies follow-up emails from recruiters and hiring teams:
+    - 📅 **Interview Calls / Invitations** $\rightarrow$ Prompts to update status to `Interviewing`
+    - 💻 **Online Coding Assessments** (HackerRank, CodeSignal, Codility, Take-home) $\rightarrow$ Updates status to `Screening (Assessment)`
+    - ❌ **Application Rejections** $\rightarrow$ Updates status to `Rejected`
+    - 🎉 **Job Offers** $\rightarrow$ Updates status to `Offer`
+  - In-browser real-time action widget directly inside Gmail and Outlook.
+  - On-demand **"✉️ Scan Emails"** button in Dashboard powered by Google Apps Script.
 - **📊 Executive Built-in Web Dashboard & Google Sheets**:
   - Live KPIs: Total Applications, Today's Submissions, Active Pipeline, and Response Rate.
   - Interactive status dropdowns (`Applied`, `Screening`, `Interviewing`, `Offer`, `Rejected`, `No Response`) that sync live to Google Sheets.
@@ -25,7 +35,8 @@
   - Automatic historical deduplication (never duplicate entries in the same 24 hours).
 - **🔒 100% Private & Open Source**:
   - **Zero intermediate servers**: Data flows directly from your browser to **your own personal Google Sheet**.
-  - Never reads passwords, emails, form inputs, or resumes.
+  - Never reads passwords, form inputs, or resumes.
+  - Open source under the [MIT License](LICENSE). Contributions welcome!
 
 ---
 
@@ -272,12 +283,89 @@ No Google Cloud setup or API keys required! This takes under 60 seconds:
            .setMimeType(ContentService.MimeType.JSON);
        }
 
+       // 4. Scan Gmail for Recruiter Updates Action (Interview, Assessment, Rejection, Offer)
+       if (data.action === 'scanGmail') {
+         const scanRes = scanGmailForUpdates(sheet);
+         return ContentService.createTextOutput(JSON.stringify(scanRes))
+           .setMimeType(ContentService.MimeType.JSON);
+       }
+
        return ContentService.createTextOutput(JSON.stringify({ status: 'ignored' }))
          .setMimeType(ContentService.MimeType.JSON);
      } catch (err) {
        return ContentService.createTextOutput(JSON.stringify({ error: err.toString() }))
          .setMimeType(ContentService.MimeType.JSON);
      }
+   }
+
+   function scanGmailForUpdates(sheet) {
+     if (!sheet) return { ok: false, updated: 0, matches: [] };
+     const apps = readApplicationsFromSheet(sheet);
+     if (!apps.length) return { ok: true, updated: 0, matches: [] };
+
+     const companyMap = {};
+     for (let i = 0; i < apps.length; i++) {
+       const co = apps[i].company.trim().toLowerCase();
+       if (co && co !== 'confidential') {
+         companyMap[co] = apps[i];
+       }
+     }
+
+     // Search Gmail for recruitment keywords within past 14 days
+     const query = 'newer_than:14d (interview OR assessment OR "not moving forward" OR hackerrank OR codesignal OR "offer of employment" OR "status of your application" OR "regret to inform")';
+     let threads = [];
+     try {
+       threads = GmailApp.search(query, 0, 30);
+     } catch (e) {
+       return { ok: false, error: 'Gmail permission or search error: ' + e.toString(), updated: 0, matches: [] };
+     }
+
+     const results = [];
+     const patterns = {
+       offer: /offer\s+of\s+employment|pleased\s+to\s+offer|congratulations\s+on\s+your\s+offer|offer\s+letter/i,
+       interview: /invitation\s+to\s+interview|schedule\s+(an?\s+interview|a\s+call|a\s+phone\s+screen)|invite\s+you\s+for\s+an?\s+interview|technical\s+interview|calendly\.com/i,
+       assessment: /online\s+assessment|coding\s+(test|challenge)|hackerrank|codesignal|codility|take-home|technical\s+assessment/i,
+       rejection: /unfortunately|not\s+moving\s+forward|decided\s+to\s+pursue\s+other|regret\s+to\s+inform|not\s+selected/i
+     };
+
+     for (let t = 0; t < threads.length; t++) {
+       const msgs = threads[t].getMessages();
+       if (!msgs.length) continue;
+       const lastMsg = msgs[msgs.length - 1];
+       const subject = lastMsg.getSubject() || '';
+       const body = (lastMsg.getPlainBody() || '').slice(0, 2500);
+       const sender = lastMsg.getFrom() || '';
+       const combined = (subject + ' ' + body + ' ' + sender).toLowerCase();
+
+       // Match against applied companies
+       let matchedApp = null;
+       for (const co in companyMap) {
+         if (combined.indexOf(co) !== -1) {
+           matchedApp = companyMap[co];
+           break;
+         }
+       }
+       if (!matchedApp) continue;
+
+       let newStatus = '';
+       let stageName = '';
+       if (patterns.offer.test(combined)) { newStatus = 'Offer'; stageName = 'Offer'; }
+       else if (patterns.interview.test(combined)) { newStatus = 'Interviewing'; stageName = 'Interview'; }
+       else if (patterns.assessment.test(combined)) { newStatus = 'Screening'; stageName = 'Assessment'; }
+       else if (patterns.rejection.test(combined)) { newStatus = 'Rejected'; stageName = 'Rejected'; }
+
+       if (newStatus && newStatus !== matchedApp.status) {
+         sheet.getRange(matchedApp.rowIndex, 5).setValue(newStatus);
+         if (stageName) sheet.getRange(matchedApp.rowIndex, 11).setValue(stageName);
+         const note = 'Auto-updated from Gmail on ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'GMT', 'yyyy-MM-dd');
+         sheet.getRange(matchedApp.rowIndex, 13).setValue(note);
+         results.push({ company: matchedApp.company, oldStatus: matchedApp.status, newStatus: newStatus });
+         matchedApp.status = newStatus;
+       }
+     }
+
+     return { ok: true, updated: results.length, matches: results };
+   }
    }
 
    function doGet(e) {
@@ -329,6 +417,30 @@ No Google Cloud setup or API keys required! This takes under 60 seconds:
    - **Initial Status**: `Applied`
    - **Source Portal & Location**
 4. Check your Google Sheet or open the JobTrack AI Dashboard to view your live tracker!
+
+---
+
+## ✉️ Email Intelligence: Automatic Status Tracking from Gmail & Outlook
+
+JobTrack AI doesn't stop after you apply. It automatically tracks recruiter communications in **Gmail** and **Outlook**:
+
+### 1. Real-Time In-Browser Detection
+When you open an email in **Gmail** (`mail.google.com`) or **Outlook** (`outlook.live.com` / `outlook.office.com`), JobTrack AI scans the sender, subject, and snippet:
+
+| Email Category | Detected Phrases | Resulting Sheet Status |
+| :--- | :--- | :--- |
+| 📅 **Interview Invitation** | "invitation to interview", "schedule a phone screen", "technical interview", Calendly link | `Interviewing` |
+| 💻 **Coding / Assessment** | "online assessment", "HackerRank test link", "CodeSignal", "take-home assignment" | `Screening` (Assessment) |
+| ❌ **Application Rejection** | "unfortunately, we will not be moving forward", "after careful consideration", "decided to pursue other candidates" | `Rejected` |
+| 🎉 **Job Offer** | "offer of employment", "pleased to offer you", "formal offer letter" | `Offer` |
+
+A discreet floating card appears at the bottom-right of your inbox with a one-click **"✓ Update Google Sheet"** button to immediately sync Column E in your tracker!
+
+### 2. On-Demand Inbox Scanning
+Prefer to scan your inbox in bulk?
+1. Open the JobTrack AI Dashboard (`dashboard.html`).
+2. Click the **✉️ Scan Emails** button in the header.
+3. The Web App backend searches your Gmail for the last 14 days of recruiter emails matching your applied companies, updates their statuses, and reloads your dashboard automatically!
 
 ---
 
@@ -397,7 +509,8 @@ jobtrack-ai/
 │   │   └── sheets.js          # Google Sheets v4 API client & row formatters
 │   ├── content/
 │   │   ├── content.js         # Submission observer & click listeners
-│   │   └── adapters.js        # Portal-specific job metadata extractors (LinkedIn, Hirist, Naukri)
+│   │   ├── adapters.js        # Portal-specific job metadata extractors (LinkedIn, Hirist, Naukri)
+│   │   └── email-scanner.js   # Real-time Gmail & Outlook recruiter email classifier
 │   ├── dashboard/             # Executive analytics & live status dashboard
 │   │   ├── dashboard.html
 │   │   ├── dashboard.css
@@ -405,10 +518,13 @@ jobtrack-ai/
 │   ├── popup/                 # Quick status popup & manual job logger
 │   ├── options/               # Extension configuration & connection settings
 │   └── shared/                # Normalization engine & helper utilities
-│       ├── engine.js          # Role disambiguation, URL title recovery & scoring
+│       ├── engine.js          # Role disambiguation, email patterns & URL title recovery
 │       └── util.js
 ├── scripts/
-│   └── google-apps-script.js  # Free standalone Apps Script webhook backend
+│   └── google-apps-script.js  # Free standalone Apps Script webhook backend & Gmail scanner
+├── CONTRIBUTING.md            # Open source contribution guide
+├── CODE_OF_CONDUCT.md         # Contributor Covenant Code of Conduct
+├── SECURITY.md                # Responsible disclosure & privacy policy
 ├── PRIVACY_POLICY.md          # Chrome Web Store compliant privacy policy
 └── LICENSE                    # MIT License
 ```
@@ -419,18 +535,19 @@ jobtrack-ai/
 
 - All credentials (OAuth tokens, Webhook URLs) stay strictly inside your local browser instance (`chrome.storage.local`).
 - No analytics, third-party trackers, or external servers are involved.
-- Read our full [Privacy Policy](PRIVACY_POLICY.md).
+- Read our full [Privacy Policy](PRIVACY_POLICY.md) and [Security Policy](SECURITY.md).
 
 ---
 
-## 🤝 Contributing
+## 🤝 Contributing & Community
 
-Contributions are welcome! To add support for new job portals or improve existing adapters:
-1. Fork the Project.
-2. Create your Feature Branch (`git checkout -b feature/NewPortalAdapter`).
-3. Commit your Changes (`git commit -m 'feat: added Glassdoor adapter'`).
-4. Push to the Branch (`git push origin feature/NewPortalAdapter`).
-5. Open a Pull Request.
+JobTrack AI is proudly **100% open-source**. Contributions from the community are warmly welcome!
+
+- **New Portals**: Want to add support for a regional job board (Dice, Glassdoor, Wellfound)?
+- **Email Intelligence**: Want to add more email patterns or recruiter signatures?
+- **Dashboard UI**: Have ideas for new charts, pipeline views, or filters?
+
+Please read our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before opening a pull request.
 
 ---
 

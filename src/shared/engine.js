@@ -221,5 +221,116 @@ JT.engine = {
       notes: `Auto-tracked by JobTrack AI (source: ${rawPortal}; site: ${U.hostOf(cur.url)})`,
       sourcePortal: portal, issues, uniqueKey: U.uniqueKey(company, title, date)
     };
+  },
+
+  classifyEmail(subject, body, sender) {
+    const text = `${subject || ''} ${body || ''} ${sender || ''}`.toLowerCase();
+
+    // 1. Offer check
+    const offerRegexes = [
+      /offer\s+of\s+employment/i,
+      /pleased\s+to\s+offer\s+you/i,
+      /congratulations\s+on\s+your\s+offer/i,
+      /formal\s+(job\s+)?offer/i,
+      /offer\s+letter/i,
+      /compensation\s+package/i
+    ];
+    for (const re of offerRegexes) {
+      if (re.test(text)) {
+        return { status: 'Offer', stage: 'Offer', label: 'Job Offer', icon: '🎉' };
+      }
+    }
+
+    // 2. Interview check
+    const interviewRegexes = [
+      /(invitation|invite)\s+to\s+(interview|an\s+interview)/i,
+      /schedule\s+(an?\s+interview|a\s+call|a\s+phone\s+screen|a\s+time\s+to\s+speak)/i,
+      /like\s+to\s+invite\s+you\s+for\s+(an?\s+interview|a\s+discussion)/i,
+      /next\s+(round|steps?)\s+(in\s+the\s+interview|of\s+interviews?|with)/i,
+      /technical\s+interview|hiring\s+manager\s+(round|interview|screen|chat)/i,
+      /availability\s+for\s+a\s+(quick\s+call|chat|phone\s+screen|video\s+call)/i,
+      /calendly\.com\/[a-z0-9_-]+/i,
+      /interview\s+schedule|zoom\s+link\s+for\s+interview|google\s+meet\s+link\s+for\s+interview/i,
+      /\b(round\s*1|round\s*2|round\s*3|final\s*round)\b/i
+    ];
+    for (const re of interviewRegexes) {
+      if (re.test(text)) {
+        return { status: 'Interviewing', stage: 'Interview', label: 'Interview Invitation', icon: '📅' };
+      }
+    }
+
+    // 3. Assessment / Coding test check
+    const assessmentRegexes = [
+      /(online|coding|technical)\s+(assessment|test|challenge|screening)/i,
+      /hackerrank\.com\/|codesignal\.com\/|codility\.com\/|testgorilla\.com\/|hirevue\.com\/|karat\.com\//i,
+      /complete\s+(your|the)\s+(assessment|coding\s+challenge|test)/i,
+      /take-home\s+(assignment|project|test|challenge)/i,
+      /link\s+to\s+(the|your)\s+(test|assessment)/i,
+      /test\s+duration\s*:\s*\d+/i
+    ];
+    for (const re of assessmentRegexes) {
+      if (re.test(text)) {
+        return { status: 'Screening', stage: 'Assessment', label: 'Coding / Assessment Call', icon: '💻' };
+      }
+    }
+
+    // 4. Rejection check
+    const rejectionRegexes = [
+      /unfortunately,?\s+(we\s+)?(will\s+not|are\s+unable|cannot|have\s+decided\s+not)\s+to\s+(move|proceed|advance)/i,
+      /after\s+careful\s+consideration/i,
+      /decided\s+to\s+(pursue|move\s+forward\s+with)\s+other\s+candidates/i,
+      /regret\s+to\s+inform\s+you/i,
+      /not\s+selected\s+for\s+(an?\s+interview|this\s+position|the\s+role)/i,
+      /wish\s+you\s+(the\s+best|every\s+success)\s+in\s+your\s+(job\s+search|career)/i,
+      /position\s+has\s+been\s+filled/i,
+      /decided\s+not\s+to\s+move\s+forward/i,
+      /not\s+moving\s+forward\s+with\s+your\s+application/i
+    ];
+    for (const re of rejectionRegexes) {
+      if (re.test(text)) {
+        return { status: 'Rejected', stage: 'Rejected', label: 'Application Rejection', icon: '❌' };
+      }
+    }
+
+    return null;
+  },
+
+  extractCompanyFromEmail(senderName, senderEmail, subject, knownList = []) {
+    const combined = `${senderName || ''} ${subject || ''}`.trim();
+
+    // 1. Check known applied companies first
+    for (const co of knownList) {
+      if (!co || co.length < 2) continue;
+      const re = new RegExp('\\b' + co.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+      if (re.test(combined)) {
+        return co;
+      }
+    }
+
+    // 2. Check subject patterns (e.g. "Interview with Acme Corp", "Update from Globex")
+    const mAt = (subject || '').match(/(?:at|with|from)\s+([A-Za-z0-9&.,\- ]+?)(?:\s*[-–—:]|\s+for|\s+regarding|\s+team|\s+interview|\s+application|$)/i);
+    if (mAt && mAt[1] && mAt[1].trim().length > 2 && mAt[1].trim().length < 40) {
+      const candidate = mAt[1].trim();
+      if (!/^(the|your|our|us|me|an?)\b/i.test(candidate)) return candidate;
+    }
+
+    // 3. Sender name (e.g. "Wise Recruiting" -> "Wise", "Haptik Careers" -> "Haptik")
+    if (senderName) {
+      let s = senderName.replace(/<.*?>/, '').trim();
+      s = s.replace(/\s+(recruiting|careers|talent|hiring|team|jobs|hr)\b.*/i, '').trim();
+      if (s.length > 2 && s.length < 40 && !/^(google|linkedin|microsoft|outlook|noreply|no-reply)$/i.test(s)) {
+        return s;
+      }
+    }
+
+    // 4. Sender domain (e.g. "careers@greyorange.com" -> "GreyOrange")
+    if (senderEmail && senderEmail.includes('@')) {
+      const domain = senderEmail.split('@')[1].split('.')[0];
+      if (domain && !['gmail', 'outlook', 'yahoo', 'greenhouse', 'lever', 'smartrecruiters', 'workday', 'ashbyhq'].includes(domain.toLowerCase())) {
+        return domain.charAt(0).toUpperCase() + domain.slice(1);
+      }
+    }
+
+    return '';
   }
 };

@@ -224,12 +224,88 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
+    // 4. Scan Gmail for Recruiter Updates Action (Interview, Assessment, Rejection, Offer)
+    if (data.action === 'scanGmail') {
+      const scanRes = scanGmailForUpdates(sheet);
+      return ContentService.createTextOutput(JSON.stringify(scanRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     return ContentService.createTextOutput(JSON.stringify({ status: 'ignored' }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ error: err.toString() }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+function scanGmailForUpdates(sheet) {
+  if (!sheet) return { ok: false, updated: 0, matches: [] };
+  const apps = readApplicationsFromSheet(sheet);
+  if (!apps.length) return { ok: true, updated: 0, matches: [] };
+
+  const companyMap = {};
+  for (let i = 0; i < apps.length; i++) {
+    const co = apps[i].company.trim().toLowerCase();
+    if (co && co !== 'confidential') {
+      companyMap[co] = apps[i];
+    }
+  }
+
+  // Search Gmail for recruitment keywords within past 14 days
+  const query = 'newer_than:14d (interview OR assessment OR "not moving forward" OR hackerrank OR codesignal OR "offer of employment" OR "status of your application" OR "regret to inform")';
+  let threads = [];
+  try {
+    threads = GmailApp.search(query, 0, 30);
+  } catch (e) {
+    return { ok: false, error: 'Gmail permission or search error: ' + e.toString(), updated: 0, matches: [] };
+  }
+
+  const results = [];
+  const patterns = {
+    offer: /offer\s+of\s+employment|pleased\s+to\s+offer|congratulations\s+on\s+your\s+offer|offer\s+letter/i,
+    interview: /invitation\s+to\s+interview|schedule\s+(an?\s+interview|a\s+call|a\s+phone\s+screen)|invite\s+you\s+for\s+an?\s+interview|technical\s+interview|calendly\.com/i,
+    assessment: /online\s+assessment|coding\s+(test|challenge)|hackerrank|codesignal|codility|take-home|technical\s+assessment/i,
+    rejection: /unfortunately|not\s+moving\s+forward|decided\s+to\s+pursue\s+other|regret\s+to\s+inform|not\s+selected/i
+  };
+
+  for (let t = 0; t < threads.length; t++) {
+    const msgs = threads[t].getMessages();
+    if (!msgs.length) continue;
+    const lastMsg = msgs[msgs.length - 1];
+    const subject = lastMsg.getSubject() || '';
+    const body = (lastMsg.getPlainBody() || '').slice(0, 2500);
+    const sender = lastMsg.getFrom() || '';
+    const combined = (subject + ' ' + body + ' ' + sender).toLowerCase();
+
+    // Match against applied companies
+    let matchedApp = null;
+    for (const co in companyMap) {
+      if (combined.indexOf(co) !== -1) {
+        matchedApp = companyMap[co];
+        break;
+      }
+    }
+    if (!matchedApp) continue;
+
+    let newStatus = '';
+    let stageName = '';
+    if (patterns.offer.test(combined)) { newStatus = 'Offer'; stageName = 'Offer'; }
+    else if (patterns.interview.test(combined)) { newStatus = 'Interviewing'; stageName = 'Interview'; }
+    else if (patterns.assessment.test(combined)) { newStatus = 'Screening'; stageName = 'Assessment'; }
+    else if (patterns.rejection.test(combined)) { newStatus = 'Rejected'; stageName = 'Rejected'; }
+
+    if (newStatus && newStatus !== matchedApp.status) {
+      sheet.getRange(matchedApp.rowIndex, 5).setValue(newStatus);
+      if (stageName) sheet.getRange(matchedApp.rowIndex, 11).setValue(stageName);
+      const note = 'Auto-updated from Gmail on ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'GMT', 'yyyy-MM-dd');
+      sheet.getRange(matchedApp.rowIndex, 13).setValue(note);
+      results.push({ company: matchedApp.company, oldStatus: matchedApp.status, newStatus: newStatus });
+      matchedApp.status = newStatus;
+    }
+  }
+
+  return { ok: true, updated: results.length, matches: results };
 }
 
 function doGet(e) {

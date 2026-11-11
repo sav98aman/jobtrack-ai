@@ -311,6 +311,26 @@
     render();
   });
 
+  if ($('scanEmailBtn')) {
+    $('scanEmailBtn').addEventListener('click', async () => {
+      showToast('Scanning Gmail for updates…', '⏳');
+      try {
+        const res = await chrome.runtime.sendMessage({ type: 'SCAN_GMAIL' });
+        if (res && res.ok && res.updated > 0) {
+          const summary = res.matches.map(m => `${m.company}: ${m.newStatus}`).join(', ');
+          showToast(`✓ Updated ${res.updated} application(s): ${summary}`, '✓');
+          setTimeout(() => loadData(true), 600);
+        } else if (res && res.ok) {
+          showToast('No new email status updates found in past 14 days', 'ℹ');
+        } else {
+          showToast(res && res.error ? res.error : 'Scan completed. No changes.', 'ℹ');
+        }
+      } catch (e) {
+        showToast('Scan error: ' + (e.message || 'Check connection'), '⚠️');
+      }
+    });
+  }
+
   $('refreshBtn').addEventListener('click', () => {
     loadData(true);
     showToast('Refreshed application list');
