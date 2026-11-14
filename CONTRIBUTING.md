@@ -141,3 +141,4 @@ To add new patterns or recruiter signatures:
 - **Discussions**: Start a conversation on GitHub Discussions.
 
 Thank you for contributing to an open, privacy-first job tracking tool! 🌟
+

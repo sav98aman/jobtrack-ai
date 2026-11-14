@@ -214,3 +214,4 @@
   observer.observe(document.documentElement, { childList: true, subtree: true });
   setTimeout(scanWebmail, 2000);
 })();
+

@@ -460,6 +460,14 @@ JT.sheets = {
     ];
   },
   async sync(rec, st, interactive = false) {
+    // Guard: Drop any applications originating from webmail
+    const link = String(rec.jobLink || '').toLowerCase();
+    const portal = String(rec.sourcePortal || '').toLowerCase();
+    if (link.includes('mail.google.com') || link.includes('outlook.') || portal.includes('gmail') || portal.includes('mail.google')) {
+      console.log('[JobTrack Sheets] Refusing to sync application from webmail:', rec.company);
+      return 'ignored';
+    }
+
     const webhookUrl = (st.webhookUrl || '').trim();
     if (webhookUrl) {
       if (webhookUrl.includes('/home/projects/') || webhookUrl.includes('docs.google.com/spreadsheets')) {
@@ -488,9 +496,10 @@ JT.sheets = {
     const U = JT.util, base = `https://sheets.googleapis.com/v4/spreadsheets/${st.spreadsheetId}/values/`;
     const rng = encodeURIComponent(`${sheetName}!A2:N`);
     const data = await this.api(`${base}${rng}?valueRenderOption=FORMATTED_VALUE`, {}, interactive);
-    const iso = v => { const t = Date.parse(v); if (isNaN(t)) return ''; const d = new Date(t), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
+    const normCo = U.norm(rec.company);
+    const normTi = U.norm(rec.title);
     const dup = (data.values || []).some(r => r[13] === rec.uniqueKey ||
-      (U.norm(r[0]) === U.norm(rec.company) && U.norm(r[1]) === U.norm(rec.title) && iso(r[2]) === rec.appliedDate));
+      (normCo && normTi && U.norm(r[0]) === normCo && U.norm(r[1]) === normTi));
     if (dup) return 'duplicate';
     const app = encodeURIComponent(`${sheetName}!A:N`);
     await this.api(`${base}${app}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,

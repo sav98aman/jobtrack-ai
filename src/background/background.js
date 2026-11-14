@@ -2,6 +2,13 @@ importScripts('../shared/util.js', '../shared/engine.js', 'sheets.js');
 const DEFAULTS = { clientId: '', spreadsheetId: '', sheetName: 'Applications',
   autoDetect: true, autoSave: true, alwaysConfirm: false, paused: false };
 const TTL = 3 * 3600e3, U = JT.util, ses = chrome.storage.session, loc = chrome.storage.local;
+const isWebmailUrl = u => {
+  if (!u) return false;
+  try {
+    const h = new URL(u).hostname.toLowerCase();
+    return /(mail\.google\.com|inbox\.google\.com|outlook\.(live|office|office365)\.com|mail\.yahoo\.com|mail\.proton|mail\.zoho|mail\.icloud)/i.test(h);
+  } catch { return false; }
+};
 const settings = async () => {
   const s = (await loc.get('settings')).settings || {};
   let changed = false;
@@ -59,8 +66,28 @@ const notify = (title, message) => {
 };
 
 async function enqueue(record) {
+  if (!record || !record.company) return;
+  // Guard: Never enqueue applications originating from webmail (webmail is handled by email-scanner)
+  if (isWebmailUrl(record.jobLink) || /gmail|mail\.google/i.test(record.sourcePortal || '') || /site:\s*mail\.google/i.test(record.notes || '')) {
+    console.log('[JobTrack Background] Dropping application from webmail source:', record);
+    return;
+  }
+  const normCo = U.norm(record.company);
+  const normTi = U.norm(record.title);
+
   const q = await get('queue', []);
-  if (q.some(i => i.record.uniqueKey === record.uniqueKey)) return;
+  if (q.some(i => i.record.uniqueKey === record.uniqueKey || (normCo && normTi && U.norm(i.record.company) === normCo && U.norm(i.record.title) === normTi))) {
+    console.log('[JobTrack Background] Duplicate application in queue, skipping:', record.company, record.title);
+    return;
+  }
+
+  // Check cached applications to prevent re-adding already tracked applications
+  let cached = (await loc.get('cachedApplications')).cachedApplications || [];
+  if (cached.some(c => c.uniqueKey === record.uniqueKey || (normCo && normTi && U.norm(c.company) === normCo && U.norm(c.title) === normTi))) {
+    console.log('[JobTrack Background] Record already in cached applications, skipping duplicate:', record.company, record.title);
+    return;
+  }
+
   q.push({ id: crypto.randomUUID(), record, attempts: 0, nextAt: 0 });
   await loc.set({ queue: q });
   processQueue(true);
@@ -115,8 +142,16 @@ async function processQueue(interactive) {
 
 async function handleEvidence(m, tabId) {
   console.log('[JobTrack Background] Received evidence for tab:', tabId, m);
+  if (isWebmailUrl(m.url) || (m.job && isWebmailUrl(m.job.canonical))) {
+    console.log('[JobTrack Background] Dropping evidence from webmail (webmail is handled exclusively by email-scanner):', m.url);
+    return;
+  }
   const st = await settings(); if (!st.autoDetect || st.paused) return;
   const ctx = (await getCtx(tabId)) || {};
+  if (ctx.origin && isWebmailUrl(ctx.origin.url)) {
+    console.log('[JobTrack Background] Dropping evidence: origin is webmail');
+    return;
+  }
   const cur = { platformId: m.platformId, url: m.url, host: U.hostOf(m.url), job: m.job, signals: m.signals };
   const { score, reasons } = JT.engine.score(m.signals, ctx);
   let level = JT.engine.level(score);
@@ -162,6 +197,7 @@ async function handle(m, sender) {
   const id = sender.tab && sender.tab.id;
   switch (m.type) {
     case 'JOB_SEEN': {
+      if (isWebmailUrl(m.url)) return;
       let c = await getCtx(id); const host = U.hostOf(m.url);
       const here = { platformId: m.platformId, url: m.url, host, job: m.job };
       if (!c || !c.applyStartedAt) c = { origin: here };
@@ -170,6 +206,7 @@ async function handle(m, sender) {
       return setCtx(id, c);
     }
     case 'APPLY_START': {
+      if (isWebmailUrl(m.url)) return;
       let c = await getCtx(id);
       if (!c) c = { origin: { platformId: m.platformId, url: m.url, host: U.hostOf(m.url), job: m.job } };
       c.applyStartedAt = Date.now();
@@ -184,6 +221,7 @@ async function handle(m, sender) {
       return setCtx(id, c);
     }
     case 'SUBMIT_CLICK': {
+      if (isWebmailUrl(m.url)) return;
       let c = await getCtx(id);
       if (!c) c = { origin: { platformId: m.platformId, url: m.url, host: U.hostOf(m.url), job: m.job } };
       c.submitAt = Date.now();
@@ -435,7 +473,8 @@ async function handle(m, sender) {
     case 'UPDATE_STATUS_FROM_EMAIL': {
       const { company, status, stage, notes } = m;
       let cached = (await loc.get('cachedApplications')).cachedApplications || [];
-      const item = cached.find(c => String(c.company || '').trim().toLowerCase() === String(company || '').trim().toLowerCase());
+      const searchCo = U.norm(company);
+      const item = cached.find(c => U.norm(c.company) === searchCo);
       const rowIndex = item ? item.rowIndex : null;
       const uniqueKey = item ? item.uniqueKey : null;
 
@@ -455,8 +494,9 @@ async function handle(m, sender) {
       const { rowIndex, status, uniqueKey, stage, notes, company } = m;
       const st = await settings();
       let cached = (await loc.get('cachedApplications')).cachedApplications || [];
+      const searchCo = U.norm(company);
       cached = cached.map(c => {
-        if ((rowIndex && c.rowIndex === rowIndex) || (uniqueKey && c.uniqueKey === uniqueKey) || (company && c.company === company)) {
+        if ((rowIndex && c.rowIndex === rowIndex) || (uniqueKey && c.uniqueKey === uniqueKey) || (company && U.norm(c.company) === searchCo)) {
           return { ...c, status, ...(stage ? { stage } : {}), ...(notes ? { notes } : {}) };
         }
         return c;

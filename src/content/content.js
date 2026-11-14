@@ -1,6 +1,14 @@
 // Content script: reads the page, reports events. Never writes to Sheets, never reads form values.
 (() => {
   if (window.__jobtrack) return; window.__jobtrack = true;
+
+  // Webmail clients (Gmail, Outlook, Yahoo Mail, etc.) are NOT job application portals.
+  // Form/application submission tracking MUST NOT run on webmail, as reading application confirmation
+  // emails or recruiter letters would trigger duplicate job application entries.
+  // Webmail is handled exclusively by email-scanner.js for recruiter status updates.
+  const isWebmail = h => /(^|\.)(mail\.google\.com|inbox\.google\.com|outlook\.(live|office|office365)\.com|mail\.yahoo\.com|mail\.proton\.(me|com)|mail\.zoho\.(com|in)|mail\.icloud\.com)$/i.test(h);
+  if (isWebmail(location.hostname)) return;
+
   const A = JT.adapters;
   const CONFIRM_RE = /(application (has been |was |is )?(submitted|received|sent|complete|delivered)|(thank you|thanks) for (applying|your application|submitting|your interest)|successfully applied|you('ve| have) (successfully )?applied|application (submitted )?successfully|we('ve| have) received your application|application complete|your application has been sent|applied to ["'].+?["']|applied to [A-Za-z0-9]|interview preparation for)/i;
   const NEG_RE = /(failed|error|unable|try again|something went wrong|invalid|already applied|not submitted)/i;

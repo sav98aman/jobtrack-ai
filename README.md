@@ -120,6 +120,7 @@ No Google Cloud setup or API keys required! This takes under 60 seconds:
      };
 
      const apps = [];
+     const seenMap = {};
      for (let idx = 0; idx < data.length; idx++) {
        const r = data[idx];
        const company = String(r[0] || '').trim();
@@ -142,6 +143,19 @@ No Google Cloud setup or API keys required! This takes under 60 seconds:
          else if (lowerUrl.indexOf('indeed.com') !== -1) portal = 'Indeed';
          else if (!portal) portal = 'Direct';
        }
+
+       const norm = function(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); };
+       const normCo = norm(company);
+       const normTi = norm(r[1]);
+       const isWebmailAccidental = jobUrl.toLowerCase().includes('mail.google.com') || portal.toLowerCase().includes('mail.google.com');
+
+       // Filter out accidental duplicate webmail rows if the company is already present
+       const dedupKey = normCo + '|' + normTi;
+       if (isWebmailAccidental && seenMap[normCo]) {
+         continue; // Skip accidental duplicate from Gmail
+       }
+       seenMap[normCo] = true;
+       if (normTi) seenMap[dedupKey] = true;
 
        apps.push({
          rowIndex: idx + 2,
@@ -264,15 +278,42 @@ No Google Cloud setup or API keys required! This takes under 60 seconds:
        // 3. Append Application Action (Auto-tracking from job boards)
        if (data.action === 'append' && data.values && data.values.length > 0) {
          const row = data.values[0];
-         const uniqueKey = row[13];
+         const newCompany = String(row[0] || '').trim();
+         const newTitle = String(row[1] || '').trim();
+         const jobLink = String(row[3] || '').trim().toLowerCase();
+         const portal = String(row[5] || '').trim().toLowerCase();
+         const notes = String(row[12] || '').trim().toLowerCase();
+         const uniqueKey = String(row[13] || '').trim();
 
-         // Deduplication check
+         // STRICT GUARD: Webmail (Gmail, Outlook) is NEVER an application source!
+         if (jobLink.includes('mail.google.com') || jobLink.includes('outlook.') ||
+             portal.includes('gmail') || portal.includes('mail.google.com') ||
+             notes.includes('site: mail.google.com')) {
+           return ContentService.createTextOutput(JSON.stringify({ status: 'ignored', reason: 'Webmail is not a job portal' }))
+             .setMimeType(ContentService.MimeType.JSON);
+         }
+
+         // Robust Deduplication check
          const lastRow = sheet.getLastRow();
-         if (lastRow > 1 && uniqueKey) {
-           const keys = sheet.getRange(2, 14, lastRow - 1, 1).getValues();
-           for (let i = 0; i < keys.length; i++) {
-             if (String(keys[i][0]).trim() === String(uniqueKey).trim()) {
-               return ContentService.createTextOutput(JSON.stringify({ status: 'duplicate' }))
+         if (lastRow > 1) {
+           const norm = function(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); };
+           const normCo = norm(newCompany);
+           const normTi = norm(newTitle);
+           const sheetData = sheet.getRange(2, 1, lastRow - 1, 14).getValues();
+
+           for (let i = 0; i < sheetData.length; i++) {
+             const exKey = String(sheetData[i][13] || '').trim();
+             const exCo = norm(sheetData[i][0]);
+             const exTi = norm(sheetData[i][1]);
+
+             // Match by Unique Key (col 14)
+             if (uniqueKey && exKey === uniqueKey) {
+               return ContentService.createTextOutput(JSON.stringify({ status: 'duplicate', rowIndex: i + 2 }))
+                 .setMimeType(ContentService.MimeType.JSON);
+             }
+             // Match by Company + Job Title (prevent duplicate rows for same job)
+             if (normCo && normTi && exCo === normCo && exTi === normTi) {
+               return ContentService.createTextOutput(JSON.stringify({ status: 'duplicate', rowIndex: i + 2 }))
                  .setMimeType(ContentService.MimeType.JSON);
              }
            }

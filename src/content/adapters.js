@@ -56,8 +56,13 @@ JT.adapters = (() => {
       urlEmployer: () => slugName(location.hostname.split('.')[0]), employer: [], title: ['[data-automation-id="jobPostingHeader"]', 'h1'] }
   ];
   const GENERIC = { id: 'generic', employer: [], title: ['h1'] };
+  const WEBMAIL = { id: 'webmail_ignore', employer: [], title: [] };
+  const isWebmail = h => /(^|\.)(mail\.google\.com|inbox\.google\.com|outlook\.(live|office|office365)\.com|mail\.yahoo\.com|mail\.proton\.(me|com)|mail\.zoho\.(com|in)|mail\.icloud\.com)$/i.test(h);
 
-  const detectPlatform = () => PLATFORMS.find(p => p.host.test(location.hostname)) || GENERIC;
+  const detectPlatform = () => {
+    if (isWebmail(location.hostname)) return WEBMAIL;
+    return PLATFORMS.find(p => p.host.test(location.hostname)) || GENERIC;
+  };
   const txt = (sels) => {
     for (const s of sels || []) { const el = document.querySelector(s); const t = el && el.textContent.trim(); if (t) return t.replace(/\s+/g, ' '); }
     return '';

@@ -72,6 +72,28 @@
           };
         });
       }
+
+      // Filter out accidental duplicate webmail entries if a real portal entry exists
+      if (rawApplications.length > 0) {
+        const seenCompanies = new Set();
+        // First record all real applications
+        rawApplications.forEach(app => {
+          const isWebmail = (app.jobLink && app.jobLink.includes('mail.google.com')) ||
+                            (app.sourcePortal && app.sourcePortal.toLowerCase().includes('mail.google.com'));
+          if (!isWebmail) {
+            seenCompanies.add((app.company || '').toLowerCase().trim());
+          }
+        });
+        // Filter out webmail entries that duplicate a real application
+        rawApplications = rawApplications.filter(app => {
+          const isWebmail = (app.jobLink && app.jobLink.includes('mail.google.com')) ||
+                            (app.sourcePortal && app.sourcePortal.toLowerCase().includes('mail.google.com'));
+          if (isWebmail && seenCompanies.has((app.company || '').toLowerCase().trim())) {
+            return false;
+          }
+          return true;
+        });
+      }
       spreadsheetId = (res && res.spreadsheetId) || '';
 
       if (res && res.ok && (res.source === 'webhook' || res.source === 'sheets')) {
